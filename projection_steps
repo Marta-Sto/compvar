@@ -1,0 +1,354 @@
+                        %%%%%%%%%%%%%%%%%%%%%% 
+% Script for source projection and parcellation with the Brainnetome Atlas.
+% Steps to conduct per subject, and then run across subjects after configuring setup.
+                        %%%%%%%%%%%%%%%%%%%%%%
+clc
+clear
+close all
+%% Set up directories and paths
+% add path to fieldtrip
+fieldtrip_dir = '/Users/stojanovic/Documents/Projects/MaxPlanck/Toolboxes/fieldtrip-20220104'; % Marta's local path
+% fieldtrip_dir = 'Volumes/LNDG/Projects/HCP/fieldtrip-20220104'; % server
+addpath(fieldtrip_dir)
+
+% set up fieldtrip defaults
+ft_defaults
+
+% add megconnectome functions
+addpath(genpath('/Volumes/LNDG/Projects/HCP/megconnectome-master/'));
+rootdir = '/Volumes/LNDG/Projects/HCP/';
+
+% get filesep depending on OS
+% this is done because there is a difference between Mac and Windows in the 
+% / key for directories.
+ff = filesep;
+
+% add directory with subject data
+megdir = [rootdir 'MEG' ff];
+subs_avail = dir(megdir); % check subs_avail as the struct has a few lines 
+                          % at the start that aren't related to files.
+%% Load data, including headmodel and sourcemodel
+% load data for a participant
+sub = subs_avail(7).name;
+datdir = [megdir sub ff];
+
+% load resting state MEG data, eyes open (4 & 5 are the following scans)
+fname = dir([datdir ff 'Rest*' ff 'rmeg*' ff sub '*MEG_3' '*.mat']);
+load([fname.folder ff fname.name]) % loads data per subject
+
+% get transformation matrix for a given subject
+t_matrix = hcp_read_ascii([datdir 'anatomy' ff sub '_MEG_anatomy_transform.txt'])
+T = t_matrix.transform.bti2spm;
+
+% check about empty room recording for pre-whitening
+
+% load headmodel, convert to milimiters
+headmod = dir([datdir 'an*' ff sub '*headmodel.mat']);
+tmp = load([headmod.folder  ff headmod.name]);
+hm = tmp.headmodel;
+hm = ft_convert_units(hm, 'mm');
+
+% load source model
+smod = dir([datdir 'an*' ff sub '*source*' '3d8*' '.mat']);
+tmp = load([smod.folder  ff smod.name]);
+sm = tmp.sourcemodel3d;
+sm = ft_convert_units(sm, 'mm');
+%% Filter
+% this would not be done for task data or an event-related design. 
+cfg = [];
+cfg.bpfilter = 'yes';
+cfg.bpfreq = [1 80];
+data = ft_preprocessing(cfg, data);
+%% Get covariance
+cfg = [];
+cfg.preproc.demean = 'yes';
+cfg.preproc.baselinewindow = 'all';
+cfg.covariance = 'yes';
+tlck = ft_timelockanalysis(cfg, data);
+%% Denoise and prewhiten data - added step
+cfg            = [];
+cfg.channel    = 'meg';
+cfg.kappa      = min(kappa_mag,kappa_grad);
+dataw_meg      = ft_denoise_prewhiten(cfg, data, tlck);
+
+% check through trials and exclude outlier trials
+cfg        = [];
+cfg.layout = 'neuromag306mag_helmet.mat';
+layout     = ft_prepare_layout(cfg);
+
+% the input here is raw data with 242 channels and 140 trials, based on the
+% denoised and prewhitened data.
+cfg        = [];
+cfg.method = 'summary';
+cfg.layout = layout;
+dataw_meg  = ft_rejectvisual(cfg, dataw_meg);
+%% Generate leadfield
+cfg             = [];
+cfg.channel     = tlck.label;
+cfg.grad        = tlck.grad;
+cfg.normalizeparam = 1;
+cfg.sourcemodel = sm;
+cfg.headmodel   = hm;
+cfg.reducerank = 2;
+cfg.normalize = 'yes';
+lf_meg   = ft_prepare_leadfield(cfg);
+
+% check based on prewhitened data
+% cfg             = [];
+% cfg.channel     = tlckw.label;
+% cfg.grad        = tlckw.grad;
+% cfg.sourcemodel = sm;
+% cfg.headmodel   = hm;
+% cfg.method      = 'singleshell';
+% cfg.singleshell.batchsize = 1000;
+% leadfield_meg   = ft_prepare_leadfield(cfg);
+%% Check leadfield
+selchan = match_str(data.grad.label, lf_meg.label);
+% selpos = find(leadfield.inside, 1, 'first');
+selpos = find(lf_meg.inside, 1, 'last');
+figure
+subplot(1,3,1); ft_plot_topo3d(data.grad.chanpos(selchan,:), lf_meg.leadfield{selpos}(:,1));
+subplot(1,3,2); ft_plot_topo3d(data.grad.chanpos(selchan,:), lf_meg.leadfield{selpos}(:,2));
+subplot(1,3,3); ft_plot_topo3d(data.grad.chanpos(selchan,:), lf_meg.leadfield{selpos}(:,3));
+%% Get regional kappa and run beamformer (LCMV)
+[u,s,v] = svd(tlck.cov);
+d       = -diff(log10(diag(s)));
+d       = d./std(d);
+
+kappa   = find(d>5,1,'first'); % kappa refers to the number of spatial components 
+                               % to be retained in the inverse solution
+cfg                 = [];
+cfg.lcmv.lambda = '5%'; % linearly constrained minimum variance beamforming
+                        % lambda is used to regularize the covariance
+                        % matrix
+cfg.lcmv.kappa = kappa;
+cfg.method          = 'lcmv';
+cfg.lcmv.keepfilter = 'yes';
+cfg.lcmv.fixedori   = 'yes';
+cfg.lcmv.weightnorm = 'nai';
+cfg.headmodel   = hm;
+cfg.sourcemodel = lf_meg;
+source          = ft_sourceanalysis(cfg, tlck);
+%% Surface
+% combine R and L hemispheres of template
+if exist('template_surface_inflated.mat')
+else
+    fname = '/Volumes/LNDG/Projects/HCP/megconnectome-master/template/Conte69.L.midthickness.4k_fs_LR.surf.gii';
+    inflated = ft_read_headshape({fname strrep(fname, '.L.', '.R.')});
+    save('template_surface_inflated.mat', 'inflated')
+end
+%% Check that the headmodel and sourcemodel are aligned
+sourcemodel = inflated;
+sourcemodel = ft_determine_units(sm);
+sourcemodel.coordsys = 'neuromag';
+save(fullfile(subj.outputpath, 'anatomy', subj.name, sprintf('%s_sourcemodel', subj.name)), 'sourcemodel');
+%% Project single trials
+% build empty structure for source data
+clear SourceTrialData
+SourceTrialData.trial = cell(1, length(data.trial));
+SourceTrialData.label = cell(1,1);
+SourceTrialData.trialinfo = data.trialinfo;
+SourceTrialData.fsample = data.fsample;
+SourceTrialData.time = data.time;
+NTrials = length(data.trial);
+
+% get trafo-matrix
+InVox=source.inside;
+TrafoMatrix = permute(squeeze(cat(3,source.avg.filter{InVox})),[ 2 1]);
+
+% get labels right
+SourceTrialData.label = [];
+for vx=1:length(find(InVox==1))
+    SourceTrialData.label{vx,1} = strcat('VirtCH', num2str(vx));
+end
+
+% source-project single trials
+for tr = 1:NTrials
+    display(['Projecting trial ' num2str(tr)])
+    SourceTrialData.trial{tr}(:,:) = TrafoMatrix(:,:)*data.trial{tr};
+end
+%% Save projected data
+% Make directory to save the source projected data
+if ~exist([datdir 'Source' ff])
+    mkdir([datdir 'Source' ff])
+end
+% -V7.3 takes a very long time, but is required for bigger data structures.
+% can use alternatives - some listed in the TARDIS documentation.
+save([datdir 'Source' ff 'CompVar_source_trials_folcmv_sub_' exmpl_sub], 'SourceTrialData',...
+        %'-V7.3')
+
+% filename = fullfile(datdir, 'Source',  sprintf('%s_source_lcmv', exmpl_sub));
+% save(filename, 'source', 'tlckw');
+
+% also save / source as dummy source
+save([datdir 'Source' ff 'CompVar_dummy_source_folcmv_sub_' exmpl_sub], 'source'); 
+%% Inspect the source file 
+source.avg 
+source.avg.mom % contains the time courses of the event-related field at the source level
+% colloquially known as virtual channels
+source.avg.pow % the ‘pow’ field is a scalar per dipole position, reflects the variance over the time window of interest
+               % and typically does not mean much
+%% As a quick check: get alpha power
+% here we get alpha power as it's the most dominant frequency, but this can
+% be adjusted for different frequencies.
+% should first run for alpha and without selecting alpha.
+cfg = [];
+cfg.method = 'mtmfft';
+cfg.taper = 'hanning';
+%cfg.toi    = 0:5:2;
+cfg.foi    = 8:1:12; % stands for frequency of interest
+%cfg.t_ftimwin = 4./cfg.foi;
+cfg.output = 'pow';
+cfg.tapsmofrq = 2;
+cfg.keeptrials = 'yes';
+cfg.pad = 'nextpow2';
+trlwise_pow= ft_freqanalysis(cfg,SourceTrialData);
+
+% average
+% this averages over the alpha band frequency - can also be adjusted.
+cfg = [];
+cfg.frequency = [8,12];
+cfg.avgoverfreq = 'yes';
+cfg.avgoverrpt = 'yes';
+alpha_dat = ft_selectdata(cfg, trlwise_pow);
+%% Fix coordinate system, interpolate and normalize
+% read templ% this averages over the alpha band frequency - can also be adjusted.
+cfg = [];
+cfg.frequency = [8,12];
+cfg.avgoverfreq = 'yes';
+cfg.avgoverrpt = 'yes';
+alpha_dat = ft_selectdata(cfg, trlwise_pow); 
+% read mri for individual subject
+ind_dir = dir([datdir 'a*/T1w*']);
+ind_mri = ft_read_mri([ind_dir.folder ff ind_dir.name]);
+
+% read template mri
+template_mri = ft_read_mri('/Volumes/LNDG/Projects/HCP/megconnectome-master/template/mni_icbm152_t1_tal_nlin_sym_09a.nii');
+clear dummy_source
+
+activation = alpha_dat.powspctrm;
+dummy_source=source;
+dummy_source.avg.pow(dummy_source.inside)=activation;
+dummy_source.time= 0;
+
+% before we interpolate source-projected data with the template,
+% we need to transform the coordinates.
+dummy_source = ft_transform_geometry(T, dummy_source);
+
+% interpolate sources
+cfg = [];
+cfg.parameter = 'all';
+source_intp.coordsys = 'mni';
+source_intp = ft_sourceinterpolate(cfg, dummy_source, ind_mri);
+
+% normalize
+cfg = [];
+cfg.template = '/Volumes/LNDG/Projects/HCP/megconnectome-master/template/mni_icbm152_t1_tal_nlin_sym_09a.nii';
+cfg.templatecoordsys = 'mni';
+
+source_intp = ft_volumenormalise(cfg, source_intp);
+%% Plotting
+% Note that surface plots (which is what one would really want) only seem
+% to work on source projected and alingned data that is still in long
+% format. Thus, fields such as .pow or .inside have to be of shape N*1, not
+% x*y*z. Unfortunately, volumne normalization leads to the latter.
+
+% change things by hand:
+n_lgth = size(source_intp.inside,1)*size(source_intp.inside,2)*...
+    size(source_intp.inside,3);
+source_f_surf = source_intp;
+source_f_surf.inside = reshape(source_intp.inside,[n_lgth,1]);
+source_f_surf.pow = reshape(source_intp.pow,[n_lgth,1]);
+source_f_surf.eta = reshape(source_intp.eta,[n_lgth,1]);
+%source_f_surf.pos = reshape(source_intp.pos,[n_lgth,1]);
+source_f_surf = rmfield(source_f_surf, 'mni');
+
+cfg              = [];
+cfg.method       = 'surface';
+cfg.funparameter = 'pow';
+
+cfg.projmethod = 'project';
+cfg.renderer   ='opengl';
+cfg.sphereradius   = 1;
+cfg.maskparameter  = cfg.funparameter;
+cfg.surfdownsample = 10;
+%cfg.funcolorlim   = [0 max(abs(source_intp.pow))];
+cfg.camlight ='yes';
+cfg.surffile = 'template_surface_inflated.mat';
+cfg.interactive = 'yes';
+
+% view from left
+ft_sourceplot(cfg,source_f_surf);
+
+% source plot only seems to work in surface mode once one uses the template
+% mri, not the individual one for interpolation. However, if one uses the
+% any template mri, things get interpolated completely wrong and there is no
+% activity at all in parietal or occipital areas.
+% Same with the T1 template from the megconnectome toolbox - that just
+% appears even blurrier in addition.
+%% Plot  slices
+% note that we can get very decent results if we
+% (1) interpolate source activity estimates onto individual mri before
+% (2) normalize the results of (1) with the template mri
+% without these steps, single subject brains will not fit properly into the
+% template. This is unexpected since HCP MEG data are supposed to come
+% with coordinates that directly map onto MNI space. Hence, a simple
+% transform into MNI space should be enough, no volume normalization should
+% be needed after source projection.
+cfg = [];
+cfg.funparameter = 'pow'; % or 'pow'
+cfg.anaparameter = 'anatomy';
+ft_sourceplot(cfg, source_f_surf);
+%% Align real trial-wise time courses
+% alpha power just acts as a quick check. actually, we want to analyze the
+% time courses of activity. hence, we have to align and transform these
+% as well.
+% note that this could also be done at a later stage in case it is faster /
+% more convenient then. results will not differ as long as trasnformation,
+% interpolation, and normalization is done before plotting.
+%% Check FOOF things
+freqs = [1:.25:80];
+fs = SourceTrialData.fsample;
+
+% usually, one would append trials but this will create problems due to the
+% number of virtual channels in this dataset.
+% hence, wel'll have to loop across trials.
+allps_sand = NaN(size(SourceTrialData.trial,2), size(SourceTrialData.label,1),...
+    size(freqs,2));
+
+for itr = 1:size(SourceTrialData.trial,2)
+    or_dat =((SourceTrialData.trial{itr}))';
+    sand_dat = [flipud(or_dat); or_dat; flipud(or_dat)];
+    [p, wf] = pwelch(((sand_dat) -mean(sand_dat,1)), [], [],freqs, fs);
+    allps_sand(itr,:,:) = p';
+    clear sand_dat
+    disp(['Done with trial ' num2str(itr) ' out of ' num2str(size(SourceTrialData.trial,2))])
+end
+
+% save spectra
+if ~exist([datdir 'PSDs'])
+    mkdir([datdir 'PSDs'])
+end
+psdfile = fullfile(datdir, 'PSDs',  sprintf('%CompVar_source_specs_', exmpl_sub, 'allps_sand'));
+save(psdfile, 'V7.3')
+%% Parcellate 
+% read atlas for parcellation
+brainnetome = ft_read_atlas('template/atlas/brainnetome/BNA_MPM_thr25_1.25mm.nii')
+
+cfg = [];
+cfg.template = brainnetome;
+cfg.interpmethod = 'nearest';
+cfg.parameter = 'pow';
+
+% interpolate the interpolated source data with the atlas
+% this is done to align the source data with the atlas regions.
+% run on the server as the output size is too large when run locally.
+intp = ft_sourceinterpolate(cfg, source_intp, brainnetome);
+ 
+% plot source based on the parcellated data
+ft_sourceplot(cfg, sourcemodel2, brainnetome);
+
+% source parcellate data based on atlas
+parcellation = ft_sourceparcellate(cfg, intp, brainnetome);
+
+% indx = find(sourcemodel2.tissue==2); % where x is the number of your choice
