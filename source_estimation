@@ -27,8 +27,9 @@ if ismac
     % basic paths for MEG data
     MODIN   = fullfile(basepath, 'MEG/');
     MODOUT  = fullfile(basepath, 'SOURCEDATA');
-    
-% for TARDIS (remote server)
+    %SOURCE  = 'Users/stojanovic/Documents/Projects/MaxPlanck/Toolboxes/fieldtrip-20220104/sourceprojection.m';
+
+    % for TARDIS (remote server)
 else
     % using Mountain Duck
     % basepath = '/Users/stojanovic/Library/Group_Containers/G69SCX94XU.duck/Library/Application_Support/duck/Volumes/tardis.mpib-berlin.mpg.de - SFTP/ScriptFolders';
@@ -39,6 +40,7 @@ else
     % basic paths for MEG
     MODIN   = fullfile(basepath,'MEG/');
     MODOUT  = fullfile(basepath,'SOURCEDATA/'); % folder in which to store source data
+    % SOURCE  = 'Users/stojanovic/Documents/Projects/MaxPlanck/Toolboxes/fieldtrip-20220104/sourceprojection.m';
     
     % add fieldtrip to path
     addpath([basepath, 'fieldtrip-20220104/']); 
@@ -81,20 +83,19 @@ for isub = 1:length(sub)
     % should maybe be file already with source projection data
     % folder with subject data
     subfolder = [MODIN sub{isub} ff 'Restin' ff 'rmegpreproc'];
-    subfile   = [subfolder ff ['MEG_3-Restin_rmegpreproc.mat']];
+    subfile   = [subfolder ff [sub{isub} '_' 'MEG_3-Restin_rmegpreproc.mat']];
     
-    cfg.MODIN   = MODIN; % input 
+    cfg.MODIN   = MODIN; % input
     cfg.MODOUT  = MODOUT; % stored output 
-    
-    % each cfg refers to one function to carry out
-    
-    % cfg.fl = filter; % filter
-    % cfg.cv = covariance; % covariance
-    % cfg.ld = leadfield; % leadfield
+    % cfg.SOURCE = SOURCE;
+   
+    % cfg.ft = filter;
+    % cfg.cv = covariance; 
+    % cfg.ld = leadfield;
     % cfg.kp = kappa;
     % cfg.pw = power; 
-    % cfg.av = alpha_dat; % or whatever frequency
-    % cfg.mri = read_mri;
+    % cfg.av = alpha_dat;
+    % cfg.mri = read_mri;s
     % cfg.int = interpolate;
     % cfg.nrm = normalise;
     % cfg.plt = plot;
@@ -131,9 +132,9 @@ mkdir('~/qsub'); cd('~/qsub');
 %% Run source estimation and parcellation
 if strcmp(compile, 'yes')
     % compile the function to be executed in a batch
-    fun2run = qsubcompile({@sourcescript}, 'toolbox', {'signal', 'stats'}); 
+    fun2run = qsubcompile({@sourceprojection}, 'toolbox', {'signal', 'stats'}); 
 else
-    fun2run = @sourcescript; % function that takes all prior inputs 
+    fun2run = @sourceprojection; % function that takes all prior inputs 
                                  % and returns the parcellated source
                                  % estimation per subject                                     
 end
