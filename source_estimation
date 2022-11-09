@@ -1,0 +1,156 @@
+function source_power()
+% Function to obtain the source power estimation per participant, run on
+% the server
+%% Set up path and add Fieldtrip
+% check whether the path is local (Mac) or on the server and set up path
+% this section runs well both locally and on TARDIS
+
+% for Mac
+if ismac
+    % using Mountain Duck to connect to the appropriate location on the server
+    % basepath = '/Users/stojanovic/Library/Group_Containers/G69SCX94XU.duck/Library/Application_Support/duck/Volumes/tardis.mpib-berlin.mpg.de - SFTP/ScriptFolders';
+    
+    basepath = '/Volumes/LNDG/Projects/HCP/'; % for MEG HCP data
+    backend = 'local';
+    compile = 'no';
+    
+    % add Fieldtrip to path and run ft_defaults
+    fieldtrip_dir = '/Users/stojanovic/Documents/Projects/MaxPlanck/Toolboxes/fieldtrip-20220104'; % on Marta's local Mac
+    addpath(fieldtrip_dir)
+    
+    ft_defaults
+    
+    % also add helpers?
+    % add megconnectome functions                                        
+    addpath(genpath('/Volumes/LNDG/Projects/HCP/megconnectome-master/'));
+
+    % basic paths for MEG data
+    MODIN   = fullfile(basepath, 'MEG/');
+    MODOUT  = fullfile(basepath, 'SOURCEDATA');
+    
+% for TARDIS (remote server)
+else
+    % using Mountain Duck
+    % basepath = '/Users/stojanovic/Library/Group_Containers/G69SCX94XU.duck/Library/Application_Support/duck/Volumes/tardis.mpib-berlin.mpg.de - SFTP/ScriptFolders';
+    
+    % when running from Matlab on TARDIS
+    basepath = 'ScriptFolders/';
+    
+    % basic paths for MEG
+    MODIN   = fullfile(basepath,'MEG/');
+    MODOUT  = fullfile(basepath,'SOURCEDATA/'); % folder in which to store source data
+    
+    % add fieldtrip to path
+    addpath([basepath, 'fieldtrip-20220104/']); 
+    ft_defaults;
+    
+    backend = 'slurm';
+    compile = 'no';
+    
+    overwrite = 1;
+end
+
+% specify resource allocation on TARDIS
+stack = 1;
+timreq = 240; % in minutes per run
+memreq = 8*1024^3; % 4GB memory requirement
+
+
+%check if dir exists, if not, create it
+checkdir = exist(MODOUT); % returns 7 if dir is an existing folder
+                          % only set up directory if it isn't already one
+if checkdir ~= 7
+    mkdir(MODOUT) % set up dir if 7 is not returned
+end
+
+
+% list HCP subjects - add all once we have the full subject list
+sub = {'100307'; '102816'; '104012'; '105923'; '106521'; '108323';'109123'; 
+       '111514'; '112920'; '113922'};
+    
+%% Make configurations (cfg) list
+% set up empty list and cell to set up the configurations
+cfg         = [];
+cfglist     = {};
+
+% loop the configurations across subjects 
+for isub = 1:length(sub)
+    
+    ff = filesep;
+    
+    % should maybe be file already with source projection data
+    % folder with subject data
+    subfolder = [MODIN sub{isub} ff 'Restin' ff 'rmegpreproc'];
+    subfile   = [subfolder ff ['MEG_3-Restin_rmegpreproc.mat']];
+    
+    cfg.MODIN   = MODIN; % input 
+    cfg.MODOUT  = MODOUT; % stored output 
+    
+    % each cfg refers to one function to carry out
+    
+    % cfg.fl = filter; % filter
+    % cfg.cv = covariance; % covariance
+    % cfg.ld = leadfield; % leadfield
+    % cfg.kp = kappa;
+    % cfg.pw = power; 
+    % cfg.av = alpha_dat; % or whatever frequency
+    % cfg.mri = read_mri;
+    % cfg.int = interpolate;
+    % cfg.nrm = normalise;
+    % cfg.plt = plot;
+    % cfg.atls = read_atlas; 
+    % cfg.int = int_atlas_source; 
+    % cfg.prc = parcellate;
+    
+    cfg.infile  = subfile;
+    cfg.outfile = [MODOUT sub{isub} 'source_parcellated.mat'];
+
+    cfg.subjno = sub(isub); % subject number
+    
+    if ~exist(cfg.outfile, 'file') || overwrite
+        cfglist = [cfglist cfg];
+    end
+end
+
+%% Shuffle configurations and check
+% shuffle list of configs to run
+cfglist = cfglist(randsample(length(cfglist),length(cfglist)));
+
+% number of data files
+fprintf('The source estimation for %d cfgs\n', length(cfglist))
+
+if strcmp(backend, 'slurm')
+    options = '-D. -c2'; % --gres=gpu:1
+else
+    options =  '-l nodes=1:ppn=3'; % torque %-q testing or gpu - ask about this line
+end
+
+% CHECK WHAT THAT DOES
+mkdir('~/qsub'); cd('~/qsub');
+
+%% Run source estimation and parcellation
+if strcmp(compile, 'yes')
+    % compile the function to be executed in a batch
+    fun2run = qsubcompile({@sourcescript}, 'toolbox', {'signal', 'stats'}); 
+else
+    fun2run = @sourcescript; % function that takes all prior inputs 
+                                 % and returns the parcellated source
+                                 % estimation per subject                                     
+end
+
+% check again how we are running this
+if strcmp(backend, 'local')
+    cellfun(fun2run, cfglist)
+    return
+end
+
+% prepare job list
+% qsubcellfun applies a function to each element of a cell array (in this
+% case, subject)
+qsubcellfun(fun2run, cfglist, 'memreq', memreq, 'timreq', timreq*60, 'stack', stack, ...
+    'StopOnError', true, 'backend', backend, 'options', options);
+
+% check the healthy execution of the function post-quitting 
+% qstat
+% qstat -an1
+% qstat -Q
