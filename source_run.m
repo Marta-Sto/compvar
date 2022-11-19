@@ -1,11 +1,11 @@
-function source_run(cfglist)
-%SOURCE PROJECTION FUNCTION Takes preprocessed HCP MEG data and returns the source
+function source_run(cfg)
+%SOURCE RUN Takes preprocessed HCP MEG data and returns the source
 %estimates and source projected data.
 
 % Parcellation obtained based on the Brainnetome atlas.
 
-% To generate activity and power estimates for parcels based on the parcels
-% from the atlas, the following steps need to be conducted:
+% To generate activity and power estimates for parcels based on the atlas, 
+% the following steps are conducted:
 % 1) read the preprocessed HCP MEG data, 
 % 2) read the headmodel and the source model, 
 % 3) filter
@@ -17,20 +17,18 @@ function source_run(cfglist)
 
 %% Pass cfg list
 % pass the configurations set up in the setup function
+
 % MODIN = cfg.MODIN;
 % MODOUT = cfg.MODOUT;
-% SOURCE = cfg.source; 
 
-subjno = cfg.subjno; % subject number
-
-restfile   = cfg.infile; 
+restfile   = cfg.restfile; 
 outfile    = cfg.outfile;
 anatfile   = cfg.anatfile;
-transform  = cfg.trans;
 headfile   = cfg.headmod;
-smodfile   = cfg.smosdfile;
-
-cfg.subjno = sub(isub); % subject number
+smodfile   = cfg.smod;
+fmrifile   = cfg.fmri;
+atlasfile  = cfg.atlas;   
+subjno     = cfg.subjno;
 
 % print out current subject number
 SUBJ = sprintf(cell2mat(subjno));
@@ -38,35 +36,38 @@ SUBJ = sprintf(cell2mat(subjno));
 disp(cfg.MODIN);
 cd(cfg.MODOUT);
 
+ff = filesep;
+
 %% Load data, headmodel and sourcemodel 
 
 % data 
-load([restfile]) % loads data per subject
-
-% print out current subject number
-SUBJ = sprintf(cell2mat(subjno));
+load([restfile]); % loads data per subject
 
 % transformation matrix
-T = transform.transform.bti2spm;
+% hcp_read_ascii([anatfile]); % transformation matrix per participant
+tmat = hcp_read_ascii([anatfile]);
+T = tmat.transform.bti2spm;
 
 % head model 
-hmp = load([headfile]);
-hm = hmp.headmodel;
+tmp = load(headfile);
+hm = tmp.headmodel;
 hm = ft_convert_units(hm, 'mm');
 
 % source model
-smp = load([smodfile]);
-sm = smp.sourcemodel3d;
+tmp = load(smodfile);
+sm = tmp.sourcemodel3d;
 sm = ft_convert_units(sm, 'mm');
 
 %% Filter
 % this would not be done for task data or an event-related design. 
+
 cfg = [];
 cfg.bpfilter = 'yes';
 cfg.bpfreq = [1 80];
 data = ft_preprocessing(cfg, data);
 
 %% Get covariance
+
 cfg = [];
 cfg.preproc.demean = 'yes';
 cfg.preproc.baselinewindow = 'all';
@@ -81,9 +82,40 @@ cfg.grad        = tlck.grad;
 cfg.normalizeparam = 1;
 cfg.sourcemodel = sm;
 cfg.headmodel   = hm;
-cfg.reducerank = 2;
-cfg.normalize = 'yes';
-lf_meg   = ft_prepare_leadfield(cfg);
+cfg.reducerank  = 2;
+cfg.normalize   = 'yes';
+lf_meg          = ft_prepare_leadfield(cfg);
+
+%% get reg kappa and run beamformer (LCMV)
+[u,s,v] = svd(tlck.cov);
+d       = -diff(log10(diag(s)));
+d       = d./std(d);
+kappa   = find(d>5,1,'first');
+
+cfg                 = [];
+cfg.lcmv.lambda = '5%';
+cfg.lcmv.kappa = kappa;
+cfg.method          = 'lcmv';
+cfg.lcmv.keepfilter = 'yes';
+cfg.lcmv.fixedori   = 'no';
+cfg.lcmv.weightnorm = 'unitnoisegain';
+cfg.headmodel   = hm;
+cfg.sourcemodel = lf_meg;
+source          = ft_sourceanalysis(cfg, tlck);
+
+%% surface
+
+% combine R and L hemispheres of template
+if exist('template_surface_inflated.mat')
+    
+else
+fname = '/home/mpib/stojanovic/megconnectome-master/template/Conte69.L.midthickness.4k_fs_LR.surf.gii';
+
+inflated = ft_read_headshape({fname strrep(fname, '.L.', '.R.')});
+
+save('template_surface_inflated.mat', subjno, 'inflated')
+
+end
 
 %% Project single trials
 
@@ -97,8 +129,8 @@ SourceTrialData.time = data.time;
 NTrials = length(data.trial);
 
 % get trafo-matrix
-InVox=source.inside;
-TrafoMatrix = permute(squeeze(cat(3,source.avg.filter{InVox})),[ 2 1]);
+InVox       = source.inside;
+TrafoMatrix = permute(squeeze(cat(3,source.avg.filter{InVox})),[3 2 1]);
 
 % get labels right
 SourceTrialData.label = [];
@@ -109,45 +141,43 @@ end
 % source-project single trials
 for tr = 1:NTrials
     display(['Projecting trial ' num2str(tr)])
-    SourceTrialData.trial{tr}(:,:) = TrafoMatrix(:,:)*data.trial{tr};
+    for mor = 1:3
+    SourceTrialData.trial{tr}(:,:,mor) = TrafoMatrix(:,:,mor)*data.trial{tr};
+    %SourceTrialData.trial{tr}(:,:) = TrafoMatrix(:,:).*data.trial{tr};
+    end
 end
 
 %% Save source trial data 
 
-% Make directory to save the source projected data
-if ~exist([datdir 'Source' ff])
-    mkdir([datdir 'Source' ff])
+% change all save directories
+% make directory to save the source projected data
+if ~exist('/home/mpib/stojanovic/SOURCEDATA/')
+    mkdir('/home/mpib/stojanovic/SOURCEDATA/')
 end
 % -V7.3 takes a very long time, but is required for bigger data structures.
 % can use alternatives - some listed in the TARDIS documentation.
-% save([datdir 'Source' ff 'CompVar_source_trials_folcmv_sub_' exmpl_sub], 'SourceTrialData',...
-        %'-V7.3')
+save(['/home/mpib/stojanovic/SOURCEDATA/' ff 'CompVar_source_trials_folcmv_sub_' subjno], 'SourceTrialData',...
+        '-V7.3')
 
 % filename = fullfile(datdir, 'Source',  sprintf('%s_source_lcmv', exmpl_sub));
 % save(filename, 'source', 'tlckw');
 
 % also save / source as dummy source
-save([datdir 'Source' ff 'CompVar_dummy_source_folcmv_sub_' exmpl_sub], 'source'); 
+save(['/home/mpib/stojanovic/SOURCEDATA/CompVar_dummy_source_folcmv_sub_100307/'], 'source'); 
 
 %% Interpolate and normalise
 
-cfg = [];
-cfg.frequency = [8,12];
-cfg.avgoverfreq = 'yes';
-cfg.avgoverrpt = 'yes';
-alpha_dat = ft_selectdata(cfg, trlwise_pow); 
-
 % read mri for individual subject
-ind_dir = dir([datdir 'a*/T1w*']);
-ind_mri = ft_read_mri([ind_dir.folder ff ind_dir.name]);
+ind_mri = ft_read_mri([fmrifile]);
 
 % read template mri
-template_mri = ft_read_mri('/Volumes/LNDG/Projects/HCP/megconnectome-master/template/mni_icbm152_t1_tal_nlin_sym_09a.nii');
+template_mri = ft_read_mri('/home/mpib/stojanovic/megconnectome-master/template/mni_icbm152_t1_tal_nlin_sym_09a.nii');
 clear dummy_source
 
-activation   = alpha_dat.powspctrm;
+% activation   = alpha_dat.powspctrm;
 dummy_source = source;
-dummy_source.avg.pow(dummy_source.inside) = activation;
+dummy_source.avg.pow
+% dummy_source.avg.pow(dummy_source.inside) = activation;
 dummy_source.time = 0;
 
 % before we interpolate source-projected data with the template,
@@ -158,11 +188,12 @@ dummy_source = ft_transform_geometry(T, dummy_source);
 cfg = [];
 cfg.parameter        = 'all';
 source_intp.coordsys = 'mni';
+cfg.interpmethod     = 'linear';
 source_intp = ft_sourceinterpolate(cfg, dummy_source, ind_mri);
 
 % normalize
 cfg = [];
-cfg.template = '/Volumes/LNDG/Projects/HCP/megconnectome-master/template/mni_icbm152_t1_tal_nlin_sym_09a.nii';
+cfg.template = '/home/mpib/stojanovic/megconnectome-master/template/mni_icbm152_t1_tal_nlin_sym_09a.nii';
 cfg.templatecoordsys = 'mni';
 
 source_intp = ft_volumenormalise(cfg, source_intp);
@@ -198,18 +229,20 @@ ft_sourceplot(cfg,source_f_surf);
 %% Parcellate
 
 % read atlas
-brainnetome = ft_read_atlas('template/atlas/brainnetome/BNA_MPM_thr25_1.25mm.nii')
+% have to read the atlas another way
+% brainnetome = ft_read_atlas('template/atlas/brainnetome/BNA_MPM_thr25_1.25mm.nii');
+brainnetome = ft_read_atlas(atlasfile);
 
 cfg = [];
 cfg.template     = 'brainnetome';
 cfg.interpmethod = 'nearest';
 cfg.parameter    = 'pow';
-cfg.visible = 'on';
+cfg.visible      = 'on';
 % interpolate the source data with the atlas.
 % this is done to align the source data with the atlas regions.
 % run on server given it's too large to run locally.
 
-intp = ft_sourceinterpolate(cfg, source, brainnetome);
+intp = ft_sourceinterpolate(cfg, source_intp, brainnetome);
 
 cfg = [];
 cfg.method = 'vertex';
@@ -221,7 +254,10 @@ cfg.atlas = 'brainnetome';
 ft_sourceplot(cfg, source, brainnetome);
 
 % source parcellate data based on atlas
-source_parc = ft_sourceparcellate(cfg, intp, brainnetome);
+parc_source = ft_sourceparcellate(cfg, intp, brainnetome);
+
+%% Save source parcellated data
+
+
 
 end
-
