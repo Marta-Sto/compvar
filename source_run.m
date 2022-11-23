@@ -18,17 +18,14 @@ function source_run(cfg)
 %% Pass cfg list
 % pass the configurations set up in the setup function
 
-% MODIN = cfg.MODIN;
-% MODOUT = cfg.MODOUT;
-
 restfile   = cfg.restfile; 
-outfile    = cfg.outfile;
 anatfile   = cfg.anatfile;
 headfile   = cfg.headmod;
 smodfile   = cfg.smod;
 fmrifile   = cfg.fmri;
 atlasfile  = cfg.atlas;   
 subjno     = cfg.subjno;
+inflated   = cfg.inflated;
 
 % print out current subject number
 SUBJ = sprintf(cell2mat(subjno));
@@ -40,12 +37,11 @@ ff = filesep;
 
 %% Load data, headmodel and sourcemodel 
 
-% data 
-load([restfile]); % loads data per subject
+% data per subject 
+load(restfile);
 
-% transformation matrix
-% hcp_read_ascii([anatfile]); % transformation matrix per participant
-tmat = hcp_read_ascii([anatfile]);
+% transformation matrix per subject
+tmat = hcp_read_ascii(anatfile); 
 T = tmat.transform.bti2spm;
 
 % head model 
@@ -65,6 +61,7 @@ cfg = [];
 cfg.bpfilter = 'yes';
 cfg.bpfreq = [1 80];
 data = ft_preprocessing(cfg, data);
+disp('Done with filtering');
 
 %% Get covariance
 
@@ -73,6 +70,7 @@ cfg.preproc.demean = 'yes';
 cfg.preproc.baselinewindow = 'all';
 cfg.covariance = 'yes';
 tlck = ft_timelockanalysis(cfg, data);
+disp('Done with Timelock');
 
 %% Generate leadfield
 
@@ -85,8 +83,11 @@ cfg.headmodel   = hm;
 cfg.reducerank  = 2;
 cfg.normalize   = 'yes';
 lf_meg          = ft_prepare_leadfield(cfg);
+disp('Leadfield ready');
 
 %% get reg kappa and run beamformer (LCMV)
+% Source analysis
+
 [u,s,v] = svd(tlck.cov);
 d       = -diff(log10(diag(s)));
 d       = d./std(d);
@@ -102,24 +103,22 @@ cfg.lcmv.weightnorm = 'unitnoisegain';
 cfg.headmodel   = hm;
 cfg.sourcemodel = lf_meg;
 source          = ft_sourceanalysis(cfg, tlck);
+disp('Sourcemodel ready')
 
-%% surface
+%% Combine right and left hemispheres
 
 % combine R and L hemispheres of template
 if exist('template_surface_inflated.mat')
-    
 else
 fname = '/home/mpib/stojanovic/megconnectome-master/template/Conte69.L.midthickness.4k_fs_LR.surf.gii';
-
+% read cortical sheet
 inflated = ft_read_headshape({fname strrep(fname, '.L.', '.R.')});
-
-save('template_surface_inflated.mat', subjno, 'inflated')
-
+save('template_surface_inflated', cell2mat(subjno), '.mat', 'inflated')
 end
 
 %% Project single trials
 
-% main output that we want to save
+disp('Preparing to project single trials')
 clear SourceTrialData
 SourceTrialData.trial = cell(1, length(data.trial));
 SourceTrialData.label = cell(1,1);
@@ -149,115 +148,61 @@ end
 
 %% Save source trial data 
 
-% change all save directories
-% make directory to save the source projected data
+% create directory to save the source trial data
 if ~exist('/home/mpib/stojanovic/SOURCEDATA/')
     mkdir('/home/mpib/stojanovic/SOURCEDATA/')
 end
+
 % -V7.3 takes a very long time, but is required for bigger data structures.
 % can use alternatives - some listed in the TARDIS documentation.
-save(['/home/mpib/stojanovic/SOURCEDATA/' ff 'CompVar_source_trials_folcmv_sub_' subjno], 'SourceTrialData',...
+save(['/home/mpib/stojanovic/SOURCEDATA' ff 'CompVar_source_trials_folcmv_sub_' cell2mat(subjno)], 'SourceTrialData',...
         '-V7.3')
 
-% filename = fullfile(datdir, 'Source',  sprintf('%s_source_lcmv', exmpl_sub));
-% save(filename, 'source', 'tlckw');
+%% Interpolate with mri
 
-% also save / source as dummy source
-save(['/home/mpib/stojanovic/SOURCEDATA/CompVar_dummy_source_folcmv_sub_100307/'], 'source'); 
-
-%% Interpolate and normalise
-
-% read mri for individual subject
-ind_mri = ft_read_mri([fmrifile]);
+disp('Interpolating')
+% read mri file
+ind_mri = ft_read_mri(fmrifile);
 
 % read template mri
 template_mri = ft_read_mri('/home/mpib/stojanovic/megconnectome-master/template/mni_icbm152_t1_tal_nlin_sym_09a.nii');
-clear dummy_source
 
-% activation   = alpha_dat.powspctrm;
-dummy_source = source;
-dummy_source.avg.pow
-% dummy_source.avg.pow(dummy_source.inside) = activation;
-dummy_source.time = 0;
+mri = ft_volumereslice(cfg,ind_mri);
 
-% before we interpolate source-projected data with the template,
-% we need to transform the coordinates.
-dummy_source = ft_transform_geometry(T, dummy_source);
-
-% interpolate sources
-cfg = [];
-cfg.parameter        = 'all';
-source_intp.coordsys = 'mni';
-cfg.interpmethod     = 'linear';
-source_intp = ft_sourceinterpolate(cfg, dummy_source, ind_mri);
-
-% normalize
-cfg = [];
-cfg.template = '/home/mpib/stojanovic/megconnectome-master/template/mni_icbm152_t1_tal_nlin_sym_09a.nii';
-cfg.templatecoordsys = 'mni';
-
-source_intp = ft_volumenormalise(cfg, source_intp);
-
-%% Plot
-
-n_lgth = size(source_intp.inside,1)*size(source_intp.inside,2)*...
-    size(source_intp.inside,3);
-source_f_surf = source_intp;
-source_f_surf.inside = reshape(source_intp.inside,[n_lgth,1]);
-source_f_surf.pow = reshape(source_intp.pow,[n_lgth,1]);
-source_f_surf.eta = reshape(source_intp.eta,[n_lgth,1]);
-%source_f_surf.pos = reshape(source_intp.pos,[n_lgth,1]);
-source_f_surf = rmfield(source_f_surf, 'mni');
-
-cfg              = [];
-cfg.method       = 'surface';
-cfg.funparameter = 'pow';
-
-cfg.projmethod = 'project';
-cfg.renderer   ='opengl';
-cfg.sphereradius   = 1;
-cfg.maskparameter  = cfg.funparameter;
-cfg.surfdownsample = 10;
-%cfg.funcolorlim   = [0 max(abs(source_intp.pow))];
-cfg.camlight ='yes';
-cfg.surffile = 'template_surface_inflated.mat';
-cfg.interactive = 'yes';
-
-% view from left
-ft_sourceplot(cfg,source_f_surf);
+cfg            = [];
+cfg.downsample = 2;
+cfg.parameter  = 'pow';
+source_mri = ft_sourceinterpolate(cfg,source,ind_mri);
+sc = ft_volumenormalise(cfg,source_mri);
 
 %% Parcellate
 
-% read atlas
-% have to read the atlas another way
-% brainnetome = ft_read_atlas('template/atlas/brainnetome/BNA_MPM_thr25_1.25mm.nii');
-brainnetome = ft_read_atlas(atlasfile);
+disp('Parcellating')
+% % read atlas
+atlas = ft_read_atlas(atlasfile);
 
+% interpolate the source data with the atlas
+clear cfg
 cfg = [];
-cfg.template     = 'brainnetome';
 cfg.interpmethod = 'nearest';
+atlas.coordsys = 'mni'; 
 cfg.parameter    = 'pow';
-cfg.visible      = 'on';
-% interpolate the source data with the atlas.
-% this is done to align the source data with the atlas regions.
-% run on server given it's too large to run locally.
+% source_parc = ft_sourceinterpolate(cfg, atlas, sc);
+source_parc = ft_sourceinterpolate(cfg,sc,atlas); 
 
-intp = ft_sourceinterpolate(cfg, source_intp, brainnetome);
+% atlas.pos = source_parc.pos;
+cfg.parcellation   = 'parcellation';
+cfg.template       = 'atlas';
+cfg.parameter      = 'all';
+cfg.method         = 'mean';
+parc_source = ft_sourceparcellate(cfg, source_parc, atlas);
 
-cfg = [];
-cfg.method = 'vertex';
-cfg.funparameter = 'pow';
-cfg.anaparameter = 'tissue';
-cfg.atlas = 'brainnetome';
-
-% plot source based on the parcellated data
-ft_sourceplot(cfg, source, brainnetome);
-
-% source parcellate data based on atlas
-parc_source = ft_sourceparcellate(cfg, intp, brainnetome);
+disp('Done parcellating, and almost all done, well done!')
 
 %% Save source parcellated data
 
-
+disp('Saving parcellated source data')
+save(['/home/mpib/stojanovic/SOURCEDATA' ff 'parc_source' cell2mat(subjno)], 'parc_source',...
+        '-V7.3')
 
 end
