@@ -1,0 +1,129 @@
+function source_setup_single_trials()
+% SOURCE SETUP Setup function for the source power estimation per participant.
+% Initialises and defines configurations to later be used in the source_run
+% function run on the server.
+
+%% Set up paths and add Fieldtrip
+% check whether the path is local or on the server
+
+%% For TARDIS only 
+
+% set basepath
+basepath = '/home/mpib/stojanovic/';
+
+% add relevant paths
+fieldtrip_dir = '/home/mpib/stojanovic/fieldtrip-20220104/';
+addpath(fieldtrip_dir);
+% addpath(basepath, 'fieldtrip-20220104/'); % fieldtrip
+addpath(basepath, 'qsub_tardis_slurmpreview/');
+addpath(genpath('/home/mpib/stojanovic/megconnectome-master/')); % megconnectome functions
+% addpath(genpath('/home/mpib/stojanovic/BrainnetomeAtlasViewer-2')); % brainnetome atlas
+
+ft_defaults;
+
+% basic paths for MEG
+MODIN   = fullfile(basepath, 'MEG/');
+MODOUT  = fullfile(basepath,'SOURCEDATA/'); % folder in which to store source data
+ATLAS   = fullfile(basepath, 'BrainnetomeAtlasViewer-2/'); % atlas
+
+backend = 'slurm';
+compile = 'no';
+overwrite = 1;
+
+% specify resource allocation on TARDIS
+stack = 1;
+timreq = 240; % in minutes per run
+memreq = 50*1024^3; % 50 GB
+
+
+%check if dir exists, if not, create it
+checkdir = exist(MODOUT); % returns 7 if dir is an existing folder
+                          % only set up directory if it isn't already one
+if checkdir ~= 7
+    mkdir(MODOUT) % set up dir if 7 is not returned
+end
+
+%% List HCP subjects - add all once all data is on server
+% make sure all data is there before running the function
+% sub = {'102816'; '104012'; '105923'; '106521'; '108323';'109123'; 
+       % '111514'; '112920'; '113922'};
+
+sub = {'100307'}; % test subject - later change to subjects above as well
+
+%% Make configurations (cfg) list
+% initialise configurations per subject
+cfg         = [];
+cfglist     = {};
+
+% loop over the configurations across subjects 
+% configurations are based on what's different between subjects
+
+for isub = 1:length(sub)
+    
+    % configure input data and output
+    cfg.MODIN   = MODIN; % input
+    cfg.MODOUT  = MODOUT; % output
+    cfg.ATLAS   = ATLAS;
+    
+    ff = filesep; % file seperator (different for Mac or Windows)
+    
+    % subject data
+    subfolder  = [MODIN sub{isub} ff sub{isub} ff 'Restin' ff 'rmegpreproc']; % location of subject file
+    restfile   = [subfolder ff [sub{isub} '_' 'MEG_3-Restin_rmegpreproc.mat']]; % subject file
+    anatfolder = [MODIN sub{isub} ff sub{isub} ff 'anatomy']; % location of anatomy file
+    anatfile   = [anatfolder ff [sub{isub} '_' 'MEG_anatomy_transform.txt']]; % anatomy of subject
+    headfile   = [anatfolder ff [sub{isub} '_' 'MEG_anatomy_headmodel.mat']]; % head model
+    smodfile   = [anatfolder ff [sub{isub} '_' 'MEG_anatomy_sourcemodel_3d8mm.mat']]; % source model
+    atlasfile  = [fieldtrip_dir 'template/atlas/brainnetome/BNA_MPM_thr25_1.25mm.nii']; % atlas
+    
+    cfg.restfile = restfile;  % input
+    cfg.anatfile = anatfile;  % anatomy
+    cfg.headmod  = headfile;  % head model
+    cfg.smod     = smodfile;  % source model
+    cfg.atlas    = atlasfile; % atlas
+    cfg.subjno   = sub(isub); % subject number
+    
+    if ~exist(cfg.outfile, 'file') || overwrite
+        cfglist = [cfglist cfg];
+    end
+end
+
+%% Shuffle configurations and check
+% shuffle list of configs to run
+cfglist = cfglist(randsample(length(cfglist),length(cfglist)));
+
+% print out the number of data files
+fprintf('The source estimation for %d subject(s)\n', length(sub))
+
+if strcmp(backend, 'slurm')
+    options = '-D. -c5'; % --gres=gpu:1 % c refers to number of CPUs requested
+else
+    options =  '-l nodes=1:ppn=3';
+end
+
+% conduct check
+mkdir('~/qsub'); cd('~/qsub');
+
+%% Run source estimation on parcellated data
+if strcmp(compile, 'yes')
+    % compile the function to be executed in a batch on the server
+    % function called has to live in the same folder as the setup function 
+    % for the handle to work
+    
+    fun2run = qsubcompile({@single_trial_source_parcellate}, 'toolbox', {'signal', 'stats'}); 
+else
+    fun2run = @single_trial_source_parcellate;    % fun2run takes all prior inputs and returns 
+                                                  % the parcellated source estimation per subject                                   
+end 
+
+% check how this is run
+if strcmp(backend, 'local')
+    cellfun(fun2run, cfglist)
+    return
+end
+
+% prepare job list, where qsubcellfun applies the source script to each 
+% element of a cell array
+
+qsubcellfun(fun2run, cfglist, 'memreq', memreq, 'timreq', timreq*60, 'stack', stack, ...
+    'StopOnError', true, 'backend', backend, 'options', options);
