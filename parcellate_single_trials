@@ -1,4 +1,6 @@
 % basic MEG source projection rationale with parcellation
+% the original script for source parcellating single trial data. 
+% uses Leo's paths.
 
 clc
 clear
