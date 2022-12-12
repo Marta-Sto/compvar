@@ -226,7 +226,9 @@ ft_sourceplot(cfg,atlas_lowres);
 
 %% parcellate single trials
 
-% what ft_sourceparcellate spits out:
+% what ft_sourceparcellate spits out (although this is interpolated with a
+% template mri):
+
 % label: {1x116 cell}  % brain parcels labels
 % anatomy: [116x1 double]
 % anatomydimord: 'chan_unknown'
@@ -248,11 +250,39 @@ for i=1:length(parc_trls.pow)
       dummy.tissue(find(dummy.tissue==i))=parc_trls.pow(i);
 end
 
+atlas_lowres.tissue = dummy.tissue;
+atlas_lowres.coordsys = 'mni';
+
+cfg=[];
+cfg.method = 'ortho'; % can change to surface or slice
+cfg.funparameter = 'pow';
+cfg.funcolormap    = 'jet';
+cfg.renderer = 'zbuffer';
+cfg.location = [-42 -20 6];
+cfg.atlas = atlas;
+cfg.funcolorlim = [-30 30];
+ft_sourceplot(cfg,atlas_lowres);
+
+% or can plot on surface in the following way:
+cfg = [];
+cfg.method         = 'surface';
+cfg.funparameter   = 'pow';
+cfg.funcolorlim    = [-30 30];
+cfg.funcolormap    = 'jet';
+cfg.projmethod     = 'nearest';
+% cfg.surfinflated   = 'surface_inflated_both_caret.mat'; % change to another surface inflated file 
+cfg.projthresh     = 0.8;
+cfg.camlight       = 'no';
+ft_sourceplot(cfg, atlas_lowres);
+view ([-70 20 50])
+light ('Position',[-70 20 50])
+material dull
+
 %% save aligned data 
 
 ff = filesep; 
 disp('Saving aligned source data')
 save(['/home/mpib/stojanovic/SOURCEDATA/Alpha' ff cell2mat(subjno) '_aligned_parcellated_source_data'], 'parc_trls',...
         '-V7.3')
-        
- % use ft_datatype to check data types
+    
+    % ft_datatype
