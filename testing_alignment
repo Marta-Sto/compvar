@@ -1,0 +1,378 @@
+
+function testing_alignment
+%%%%%%%%% SOURCE PROJECTI SCRIPT %%%%%%%%%
+
+%% add fieldtrip and other paths 
+
+% add fieldtrip
+fieldtrip_dir = '/Users/stojanovic/Documents/Projects/MaxPlanck/Toolboxes/fieldtrip-20220104/';
+addpath(fieldtrip_dir)
+ft_defaults
+
+% also add megconnectome functions
+addpath(genpath('/Volumes/LNDG/Projects/HCP/megconnectome-master/'));
+
+%% set up configurations and load necessary files
+
+% set up configurations based on whether the script is run locally or on
+% TARDIS server
+
+if ismac % local machine
+    
+    % set fieldtrip path
+    fieldtrip_dir = '/Users/stojanovic/Documents/Projects/MaxPlanck/Toolboxes/fieldtrip-20220104/'; % Marta's local path
+    addpath(fieldtrip_dir)
+    
+    % run fieldtrip defaults
+    ft_defaults
+    
+    % add megconnectome functions
+    addpath(genpath('/Volumes/LNDG/Projects/HCP/Sourceproject/MEG/megconnectome-master/'));
+    basepath = '/Volumes/LNDG/Projects/HCP/Sourceproject/';
+    addpath(basepath); 
+    
+    MODIN   = fullfile(basepath, 'MEG/'); % directory for MEG files 
+    MODOUT  = fullfile(basepath,'SOURCEDATA/'); % folder in which to store source data
+    ATLAS   = fullfile(basepath, 'BrainnetomeAtlasViewer-2/'); % atlas
+    
+else % for TARDIS (remote server)
+    
+    % set basepath
+    basepath = '/home/mpib/stojanovic/';
+
+    % add relevant paths
+    fieldtrip_dir = '/home/mpib/stojanovic/fieldtrip-20220104/';
+    addpath(fieldtrip_dir);
+
+    addpath(basepath, 'qsub_tardis_slurmpreview/');
+    % megconnectome functions
+    addpath(genpath('/home/mpib/stojanovic/megconnectome-master/'));
+
+    % call fieldtrip defaults
+    ft_defaults;
+
+    % basic paths for MEG
+    MODIN   = fullfile(basepath, 'MEG/MEG/');
+    MODOUT  = fullfile(basepath,'SOURCEDATA/'); % folder in which to store source data
+    ATLAS   = fullfile(basepath, 'BrainnetomeAtlasViewer-2/'); % atlas
+
+    backend = 'slurm';
+    compile = 'no';
+    overwrite = 1;
+end
+
+% specify resource allocation on TARDIS
+stack = 1;
+timreq = 240; % in minutes per run
+memreq = 50*1024^3; % 50 GB
+
+
+%check if dir exists, if not, create it
+checkdir = exist(MODOUT); % returns 7 if dir is an existing folder
+                          % only set up directory if it isn't already one
+if checkdir ~= 7
+    mkdir(MODOUT) % set up dir if 7 is not returned
+end
+
+%% list HCP subjects
+
+% make sure all data is there before running the function
+% add more subjects once they're all on the server
+sub = {'100307'; '102816'; '105923'; '106521'; '108323';'109123'; 
+       '111514'; '112920'; '113922'};
+   
+%% load atlas
+
+atlas = ft_read_atlas([fieldtrip_dir '/template/atlas/brainnetome/BNA_MPM_thr25_1.25mm.nii']); % brainnetome
+% atlas = ft_read_atlas([fieldtrip_dir 'template/atlas/aal/ROI_MNI_V4.nii']); %AAL
+
+%% make configurations (cfg) list
+% initialise configurations per subject
+cfg         = [];
+cfglist     = {};
+
+% loop over the configurations across subjects 
+% configurations based on what's different between subjects
+for isub = 1:length(sub)
+    
+    % configure input data and output
+    cfg.MODIN   = MODIN; % input
+    cfg.MODOUT  = MODOUT; % output
+    cfg.ATLAS   = ATLAS;
+    
+    ff = filesep; % file seperator (different for Mac or Windows)
+    
+    % subject data
+    subfolder  = [MODIN sub{isub} ff 'Restin' ff 'rmegpreproc'];
+    restfile   = [subfolder ff [sub{isub} '_' 'MEG_3-Restin_rmegpreproc.mat']];
+    anatfolder = [MODIN sub{isub} ff 'anatomy']; % folder of anatomy file 
+    anatfile   = [anatfolder ff [sub{isub} '_' 'MEG_anatomy_transform.txt']]; % anatomy file
+    headfile   = [anatfolder ff [sub{isub} '_' 'MEG_anatomy_headmodel.mat']]; % head model
+    smodfile   = [anatfolder ff [sub{isub} '_' 'MEG_anatomy_sourcemodel_3d8mm.mat']]; % source model
+    atlasfile  = [fieldtrip_dir 'template/atlas/brainnetome/BNA_MPM_thr25_1.25mm.nii']; % atlas file
+    
+    cfg.restfile = restfile;  % input
+    cfg.outfile  = [MODOUT sub{isub} 'source_parcel.mat']; % output
+    cfg.anatfile = anatfile;  % anatomy
+    cfg.headmod  = headfile;  % head model
+    cfg.smod     = smodfile;  % source model
+    cfg.atlas    = atlasfile; % atlas
+    cfg.subjno   = sub(isub); % subject number
+    
+    if ~exist(cfg.outfile, 'file') || overwrite
+        cfglist = [cfglist cfg];
+    end
+end
+
+%% shuffle configurations and check
+
+% shuffle list of configs to run
+cfglist = cfglist(randsample(length(cfglist),length(cfglist)));
+
+%% pass necessary configurations
+
+% set up configurations
+restfile   = cfg.restfile; 
+anatfile   = cfg.anatfile;
+headfile   = cfg.headmod;
+smodfile   = cfg.smod;
+atlasfile  = cfg.atlas;   
+subjno     = cfg.subjno;
+
+disp(cfg.MODIN);
+cd(cfg.MODOUT);
+
+%% load necessary files 
+
+% data per subject 
+load(restfile);
+
+% head model 
+tmp = load(headfile);
+hm = tmp.headmodel;
+hm = ft_convert_units(hm, 'mm');
+
+% source model
+tmp = load(smodfile);
+sm = tmp.sourcemodel3d;
+sm = ft_convert_units(sm, 'mm'); % can also be cm
+
+%% apply transformation 
+
+% get transformation matrix for given subject
+% can also play around with applying the transformation later on
+
+% transformation matrix per subject
+tmat = hcp_read_ascii(anatfile); 
+T = tmat.transform.bti2spm;
+
+% apply transformations to headmodel and sourcemodel
+hm_trans = ft_transform_geometry(T, hm);
+hm_trans.coordsys = 'mni';
+
+sm_trans = ft_transform_geometry(T, sm);
+sm_trans.coordsys = 'mni';
+
+%% filter data from resting-state (rest)file
+
+cfg = [];
+cfg.bpfilter = 'yes';
+cfg.bpfreq = [1 80];
+data = ft_preprocessing(cfg, data);
+
+%% create template source model
+
+% doesn't plot with the transformed versions
+% cfg = [];
+% cfg.xgrid  = -20:1:20;
+% cfg.ygrid  = -20:1:20;
+% cfg.zgrid  = -20:1:20;
+% cfg.unit   = 'mm';
+% cfg.tight  = 'yes';
+% cfg.inwardshift = -1.5;
+% cfg.headmodel   = hm_trans;
+% template_grid   = ft_prepare_sourcemodel(cfg);
+% template_grid.coordsys = 'mni';
+% template_grid = ft_convert_units(template_grid,'mm');
+% disp('Headmodel and sourcemodel ready');
+
+%% apply atlas
+
+% evaluate this as the transformation doesn't work
+cfg = [];
+cfg.atlas      = atlas;
+cfg.roi        = atlas.tissuelabel;  % here you can also specify a single label, i.e. single ROI
+cfg.inputcoord = 'mni';
+% mask           = ft_volumelookup(cfg, template_grid);
+mask = ft_volumelookup(cfg,sm_trans);
+
+% tmp                  = repmat(template_grid.inside,1,1);
+% tmp(tmp==1)          = 0;
+% tmp(mask)            = 1;
+% define inside locations according to the atlas based mask
+% template_grid.inside = tmp;
+
+% determine inside positions
+sm_trans.inside = false(sm_trans.dim);
+sm_trans.inside(mask==1) = true;
+
+% plot the atlas based grid
+figure; ft_plot_mesh(sm_trans.pos(sm_trans.inside,:));
+
+%% load mri
+
+% navigate to mri folder by hand
+mri = ft_read_mri('T1w_acpc_dc_restore.nii.gz'); 
+mri.coordsys = 'mni';
+
+%% create sourcemodel to use 
+
+cfg           = [];
+cfg.warpmni   = 'yes';
+cfg.template  = sm_trans;
+% cfg.template  = sm;
+cfg.nonlinear = 'yes'; % use non-linear normalization
+cfg.mri       = mri;
+cfg.coordsys  = 'mni';
+sourcemodel_to_use  = ft_prepare_sourcemodel(cfg);
+
+%% plot sourcemodel on headmodel
+
+figure; hold on     % plot all objects in one figure
+ft_plot_headmodel(hm_trans, 'facecolor','cortex','edgecolor','none'); alpha 0.5; camlight;   
+alpha 0.4 % make the surface transparent
+ft_plot_mesh(sourcemodel_to_use.pos(sourcemodel_to_use.inside,:));
+
+%% get covariance
+
+cfg = [];
+cfg.preproc.demean = 'yes';
+cfg.preproc.baselinewindow = 'all';
+cfg.covariance = 'yes';
+tlck = ft_timelockanalysis(cfg, data);
+
+%% tlck of all trials
+
+cfg = [];
+cfg.preproc.demean = 'yes';
+cfg.preproc.baselinewindow = 'all';
+cfg.covariance = 'yes';
+cfg.keeptrials = 'yes';
+tlck_all = ft_timelockanalysis(cfg, data);
+
+%% generate leadfield
+
+cfg             = [];
+cfg.channel     = tlck.label;
+cfg.grad        = tlck.grad;
+cfg.normalizeparam = 1;
+cfg.method      = 'basedonmri';
+cfg.sourcemodel = sourcemodel_to_use;
+cfg.headmodel   = hm_trans; % cfg.headmodel   = hm;
+cfg.reducerank  = 2; % the default for MEG
+cfg.normalize   = 'yes';
+cfg.grid        = sourcemodel_to_use;
+lf_meg          = ft_prepare_leadfield(cfg);
+lf_meg_trans    = ft_transform_geometry(T, lf_meg);
+
+%% get reg kappa and run beamformer (LCMV)
+
+[u,s,v] = svd(((tlck.cov)));
+d       = -diff(log10(diag(s)));
+d       = d./std(d);
+kappa   = find(d>5,1,'first');
+
+cfg                 = [];
+cfg.lcmv.lambda = '5%';
+cfg.lcmv.kappa = kappa;
+cfg.method          = 'lcmv';
+cfg.lcmv.keepfilter = 'yes';
+cfg.lcmv.fixedori   = 'yes';
+cfg.lcmv.weightnorm = 'unitnoisegain';
+cfg.headmodel   = hm_trans;
+cfg.sourcemodel = sourcemodel_to_use;
+source_avg      = ft_sourceanalysis(cfg, tlck);
+
+%% make atlas low res
+
+cfg = [];
+cfg.parameter = 'all';
+cfg.interpmethod = 'nearest';
+atlas_lowres = ft_sourceinterpolate(cfg, atlas, source_avg);
+atlas_lowres.pos = source_avg.pos;
+atlas_lowres.coordsys = 'mni';
+
+%% plot source interpolated data
+
+% done on low resolution atlas
+
+cfg               = [];
+cfg.method        = 'ortho';
+cfg.funparameter  = 'pow';
+cfg.anaparameter  = 'tissue';
+cfg.location = [64 -32 8];
+cfg.funcolormap = 'jet';
+ft_sourceplot(cfg,source_avg,atlas_lowres);
+
+%% parcellate single trials
+
+% what ft_sourceparcellate spits out (although this is interpolated with a
+% template mri):
+% label: {1x116 cell}  % brain parcels labels
+% anatomy: [116x1 double]
+% anatomydimord: 'chan_unknown'
+% pow: [116x1 double]% one value of brain activity per parcel
+% powdimord: 'chan'
+% brainordinate: [1x1 struct]
+% cfg: [1x1 struct]
+
+cfg = [];
+cfg.method = 'pca'; % sometimes gives error the number of channels in the montage is inconsistent
+cfg.parcellation = 'tissue';
+parc_trls = ft_virtualchannel(cfg, tlck_all, source_avg, atlas_lowres);
+
+%% create dummy struct for subsequent plotting 
+
+dummy=atlas;
+for i=1:length(parc_trls.pow)
+      dummy.tissue(find(dummy.tissue==i))=parc_trls.pow(i);
+end
+
+atlas_lowres.tissue = dummy.tissue;
+atlas_lowres.coordsys = 'mni';
+
+cfg=[];
+cfg.method = 'ortho'; % can change to surface or slice
+cfg.funparameter = 'pow';
+cfg.funcolormap    = 'jet';
+cfg.renderer = 'zbuffer';
+cfg.location = [-42 -20 6];
+cfg.atlas = atlas;
+cfg.funcolorlim = [-30 30];
+ft_sourceplot(cfg,source_avg,atlas_lowres);
+
+% or can plot on surface in the following way:
+cfg = [];
+cfg.method         = 'surface';
+cfg.funparameter   = 'pow';
+cfg.funcolorlim    = [-30 30];
+cfg.funcolormap    = 'jet';
+cfg.projmethod     = 'nearest';
+% cfg.surfinflated   = 'surface_inflated_both_caret.mat'; % change to another surface inflated file 
+cfg.projthresh     = 0.8;
+cfg.camlight       = 'no';
+ft_sourceplot(cfg, source_avg,atlas_lowres);
+view ([-70 20 50])
+light ('Position',[-70 20 50])
+material dull
+
+%% save aligned data 
+
+ff = filesep; 
+disp('Saving aligned source data')
+save(['/home/mpib/stojanovic/SOURCEDATA/Alpha' ff cell2mat(subjno) '_aligned_parcellated_source_data'], 'parc_trls',...
+        '-V7.3')
+% use ft_datatype or ft_checkdata to check the types of data that need to 
+% be fed to Fieldtrip functions
+
+end 
