@@ -1,0 +1,402 @@
+%%%% SOURCE PROJECTION MAIN ROUTINE %%%% 
+
+%%%% routine for loading and visualising parcellated data per subject %%%%
+
+clc
+clear 
+close all
+
+%% add fieldtrip and relevant paths 
+
+% add fieldtrip
+fieldtrip_dir = '/Users/stojanovic/Documents/Projects/MaxPlanck/Toolboxes/fieldtrip-20220104/';
+addpath(fieldtrip_dir)
+ft_defaults
+
+% also add megconnectome functions
+addpath(genpath('/Volumes/LNDG/Projects/HCP/megconnectome-master/'));
+
+% access and load data for single (example) subject
+rootdir = '/Volumes/LNDG/Projects/HCP/';
+ff = filesep; % depending on operating system
+
+megdir = [rootdir 'Sourceproject' ff 'MEG' ff];
+subs_avail = dir(megdir);
+
+exmpl_sub = subs_avail(7).name;
+datdir = [megdir exmpl_sub ff];
+
+% load data for one subject
+fname = dir([datdir ff 'Rest*' ff 'rmeg*' ff exmpl_sub '*MEG_3' '*.mat']);
+load([fname.folder ff fname.name])
+
+% get transformation matrx for subject
+hcp_read_ascii([datdir 'anatomy' ff exmpl_sub '_MEG_anatomy_transform.txt'])
+T = transform.bti2spm;
+
+% load headmodel, convert to milimiters
+headmod = dir([datdir 'an*' ff exmpl_sub '*headmodel.mat']);
+tmp = load([headmod.folder  ff headmod.name]);
+hm = tmp.headmodel;
+hm = ft_convert_units(hm, 'mm');
+
+% load source model
+smod = dir([datdir 'an*' ff exmpl_sub '*source*' '3d6mm*' '.mat']);
+tmp = load([smod.folder  ff smod.name]);
+sm = tmp.sourcemodel3d;
+sm = ft_convert_units(sm, 'mm');
+
+%% filter data
+
+cfg = [];
+cfg.bpfilter = 'yes';
+cfg.bpfreq = [1 80];
+data = ft_preprocessing(cfg, data);
+
+%% get covariance
+
+cfg = [];
+cfg.preproc.demean = 'yes';
+cfg.preproc.baselinewindow = 'all';
+cfg.covariance = 'yes';
+tlck = ft_timelockanalysis(cfg, data);
+
+%% generate leadfield
+
+% cfg             = [];
+% cfg.channel     = tlck.label;
+% cfg.grad        = tlck.grad;
+% cfg.normalizeparam = 1;
+% cfg.sourcemodel = sm;
+% cfg.headmodel   = hm;
+% cfg.reducerank = 2;
+% cfg.normalize = 'yes';
+% lf_meg   = ft_prepare_leadfield(cfg);
+
+%% check leadfield
+
+selchan = match_str(tlck.grad.label, lf_meg.label);
+selpos = find(lf_meg.inside, 1, 'last');
+figure
+subplot(1,3,1); ft_plot_topo3d(tlck.grad.chanpos(selchan,:), lf_meg.leadfield{selpos}(:,1));
+subplot(1,3,2); ft_plot_topo3d(tlck.grad.chanpos(selchan,:), lf_meg.leadfield{selpos}(:,2));
+subplot(1,3,3); ft_plot_topo3d(tlck.grad.chanpos(selchan,:), lf_meg.leadfield{selpos}(:,3));
+
+%% load atlas
+
+atlas = ft_read_atlas([fieldtrip_dir '/template/atlas/brainnetome/BNA_MPM_thr25_1.25mm.nii']); % brainnetome
+atlas = ft_read_atlas([fieldtrip_dir 'template/atlas/aal/ROI_MNI_V4.nii']); %AAL
+
+%% transform head and sourcemodel
+
+% per subject
+% transform sm
+sm_trans = ft_transform_geometry(T, sm);
+sm_trans.coordsys = 'mni';
+
+% transform hm
+hm_trans = ft_transform_geometry(T, hm);
+hm_trans.coordsys = 'mni';
+
+%% apply atlas to subject sourcemodel
+
+% here, can play around with whether I apply the transformation to the head
+% model and sourcemodel first, or apply it later.
+
+cfg = [];
+cfg.atlas      = atlas;
+cfg.roi        = atlas.tissuelabel; % here you can also specify a single label, i.e. single ROI
+cfg.inputcoord = 'mni';
+% mask         = ft_volumelookup(cfg, template_grid);
+mask = ft_volumelookup(cfg,sm_trans);
+
+% determine inside positions
+sm_trans.inside = false(sm_trans.dim);
+sm_trans.inside(mask==1) = true;
+
+% plot the atlas based grid
+figure; ft_plot_mesh(sm_trans.pos(sm_trans.inside,:));
+% the source plot sometimes looks a bit weird laterally/on one side
+
+%% load mri
+
+% navigate to relevant anatomy folder by hand - figure out how to load mri
+% without having to do this
+
+mri = ft_read_mri('T1w_acpc_dc_restore.nii.gz'); 
+mri.coordsys = 'mni'; % might not work to only add this manually
+
+%% create sourcemodel to use 
+
+% appears to be all mni
+cfg           = [];
+cfg.warpmni   = 'yes';
+cfg.method    = 'basedonmri';
+cfg.unit      = 'mm';
+cfg.template  = sm_trans;
+cfg.nonlinear = 'yes'; % use non-linear normalization
+cfg.mri       = mri;
+cfg.coordsys  = 'mni';
+sourcemodel_to_use  = ft_prepare_sourcemodel(cfg);
+disp('Sourcemodel created');
+
+%% plot sourcemodel on headmodel
+
+figure; hold on     % plot all objects in one figure
+ft_plot_headmodel(hm_trans, 'facecolor','cortex','edgecolor','none'); alpha 0.5; camlight;   
+alpha 0.4           % make the surface transparent
+ft_plot_mesh(sourcemodel_to_use.pos(sourcemodel_to_use.inside,:));
+
+%% get covariance
+
+cfg = [];
+cfg.preproc.demean = 'yes';
+cfg.preproc.baselinewindow = 'all';
+cfg.covariance = 'yes';
+tlck = ft_timelockanalysis(cfg, data);
+
+%% generate leadfield based on sourcemodel_to_use
+
+% play around here with using 'sourcemodel_to_use' instead of sm and see
+% what the output is when this is visualised
+
+cfg             = [];
+cfg.channel     = tlck.label;
+cfg.grad        = tlck.grad;
+cfg.normalizeparam = 1;
+cfg.sourcemodel = sourcemodel_to_use;
+cfg.headmodel   = hm_trans;
+cfg.reducerank  = 2;
+cfg.normalize   = 'yes';
+lf_meg   = ft_prepare_leadfield(cfg);
+
+%% check leadfield
+
+% ask about the leadfield, aka what the subplots mean
+selchan = match_str(data.grad.label,lf_meg.label);
+% selpos = find(leadfield.inside, 1, 'first');
+selpos = find(lf_meg.inside, 1, 'last');
+figure
+subplot(1,3,1); ft_plot_topo3d(data.grad.chanpos(selchan,:), lf_meg.leadfield{selpos}(:,1));
+subplot(1,3,2); ft_plot_topo3d(data.grad.chanpos(selchan,:), lf_meg.leadfield{selpos}(:,2));
+subplot(1,3,3); ft_plot_topo3d(data.grad.chanpos(selchan,:), lf_meg.leadfield{selpos}(:,3));
+
+%% tlck of all trials
+
+cfg = [];
+cfg.preproc.demean         = 'yes';
+cfg.preproc.baselinewindow = 'all';
+cfg.covariance = 'yes';
+cfg.keeptrials = 'yes';
+tlck_all       = ft_timelockanalysis(cfg, data);
+disp('Done with timelock of all trials');
+
+%% get reg kappa and run beamformer (LCMV)
+
+[u,s,v] = svd(((tlck.cov)));
+d       = -diff(log10(diag(s)));
+d       = d./std(d);
+kappa   = find(d>5,1,'first');
+
+cfg             = [];
+cfg.lcmv.lambda = '5%';
+cfg.lcmv.kappa  = kappa;
+cfg.method          = 'lcmv';
+cfg.lcmv.keepfilter = 'yes';
+cfg.lcmv.fixedori   = 'yes';
+% cfg.lcmv.weightnorm = 'unitnoisegain';
+cfg.lcmv.weightnorm = 'nai'; % minimise the centre of the head bias 
+cfg.headmodel   = hm_trans;
+cfg.sourcemodel = sourcemodel_to_use;
+source_avg      = ft_sourceanalysis(cfg, tlck);
+disp('Completed source averaging');
+
+%% interpolate atlas
+
+% make the atlas low res
+cfg              = [];
+cfg.parameter    = 'all';
+cfg.interpmethod = 'nearest';
+intp_atlas       = ft_sourceinterpolate(cfg,atlas,source_avg);
+intp_atlas.pos   = source_avg.pos;
+intp_atlas.coordsys = 'mni';
+
+%% plot source average data
+
+% plotting done on low resolution atlas
+
+% orthogonal view
+cfg               = [];
+cfg.method        = 'ortho'; % check how to plot with surface again 
+cfg.funparameter  = 'pow';
+cfg.anaparameter  = 'tissue';
+cfg.renderer      = 'zbuffer';
+cfg.projmethod    = 'nearest';
+cfg.location      = [64 -32 8];
+% cfg.location    = [-42 -20 6];
+cfg.funcolormap   = 'jet';
+ft_sourceplot(cfg,source_avg,intp_atlas);
+view ([-70 20 50])
+% light ('Position',[-70 20 50])
+% material dull
+
+% surface view
+cfg               = [];
+cfg.method      = 'surface';
+cfg.funparameter  = 'pow';
+cfg.atlas         = intp_atlas;
+cfg.anaparameter  = 'tissue';
+cfg.renderer      = 'zbuffer';
+cfg.projmethod    = 'nearest';
+cfg.location      = [64 -32 8];
+% cfg.location    = [-42 -20 6];
+cfg.funcolormap   = 'jet';
+ft_sourceplot(cfg,source_avg);
+view ([-70 20 50])
+% light ('Position',[-70 20 50])
+% material dull
+
+%% project single trials
+% Build empty structure for source data
+
+% clear SourceTrialData
+% SourceTrialData.trial = cell(1, length(data.trial));
+% SourceTrialData.label = cell(1,1);
+% SourceTrialData.trialinfo = data.trialinfo;
+% SourceTrialData.fsample = data.fsample;
+% SourceTrialData.time = data.time;
+% NTrials = length(data.trial);
+% 
+% % Get trafo-matrix
+% InVox = source_avg.inside;
+% % here can check whether source_avg outputs the same as source from the
+% % original single trial script
+% TrafoMatrix = permute(squeeze(cat(3,source_avg.avg.filter{InVox})),[ 2 1]);
+% 
+% % get labels right
+% SourceTrialData.label = [];
+% for vx=1:length(find(InVox==1))
+%     SourceTrialData.label{vx,1} = strcat('VirtCH', num2str(vx));
+% end
+% 
+% % source-project single trials
+% for tr = 1:NTrials
+%     display(['Projecting trial ' num2str(tr)])
+%     SourceTrialData.trial{tr}(:,:) = TrafoMatrix(:,:)*data.trial{tr};
+% end
+% 
+% %% plot source trial data
+% 
+% % orthogonal view
+% cfg               = [];
+% cfg.method        = 'ortho'; % check how to plot with surface again 
+% cfg.funparameter  = 'pow';
+% cfg.anaparameter  = 'tissue';
+% cfg.renderer      = 'zbuffer';
+% cfg.projmethod    = 'nearest';
+% cfg.location      = [64 -32 8];
+% % cfg.location    = [-42 -20 6];
+% cfg.funcolormap   = 'jet';
+% ft_sourceplot(cfg,SourceTrialData,intp_atlas);
+% view ([-70 20 50])
+% % light ('Position',[-70 260 50])
+% % material dull
+% 
+% surface view
+cfg               = [];
+cfg.method      = 'surface';
+cfg.funparameter  = 'pow';
+cfg.atlas         = intp_atlas;
+cfg.anaparameter  = 'tissue';
+cfg.renderer      = 'zbuffer';
+cfg.projmethod    = 'nearest';
+cfg.location      = [64 -32 8];
+% cfg.location    = [-42 -20 6];
+cfg.funcolormap   = 'jet';
+ft_sourceplot(cfg,alpha_dat);
+view ([-70 20 50])
+% light ('Position',[-70 20 50])
+% material dull
+
+%% get alpha power
+
+cfg = [];
+cfg.method = 'mtmfft';
+cfg.taper = 'hanning';
+%cfg.toi    = 0:5:2;
+cfg.foi    = 8:1:12;
+%cfg.t_ftimwin = 4./cfg.foi;
+cfg.output = 'pow';
+cfg.tapsmofrq = 2;
+cfg.keeptrials = 'yes';
+cfg.pad = 'nextpow2';
+trlwise_pow = ft_freqanalysis(cfg,SourceTrialData);
+
+% average
+cfg = [];
+cfg.frequency = [8,12];
+cfg.avgoverfreq = 'yes';
+cfg.avgoverrpt = 'yes';
+alpha_dat = ft_selectdata(cfg,trlwise_pow);
+
+%% parcellate single trials
+
+cfg              = [];
+cfg.method       = 'pca'; % sometimes gives error the number of channels in the montage is inconsistent
+cfg.parcellation = 'tissue';
+parc_trls        = ft_virtualchannel(cfg,tlck_all,source_avg,intp_atlas);
+
+%% try and parcellate source avg to get closer to dummy
+
+cfg = [];
+cfg.parcellation = 'tissue';
+source_avg_parc = ft_sourceparcellate(cfg,source_avg,intp_atlas);
+source_avg_parc.pos = source_avg.pos;
+
+%% obtain average from single parcellated trials
+
+% transform parc_trls into source space structure
+% look around for fieldtrip tutorial on leadfield
+
+cfg               = [];
+cfg.trials        = 'all';
+cfg.avgoverrpt  = 'yes';
+cfg.avgovertime   = 'yes';
+cfg.headmodel       = hm_trans;
+cfg.sourcemodel   = sourcemodel_to_use;
+parc_avg          = ft_selectdata(cfg,parc_trls);
+
+% set the power to trials for plotting
+%parc_avg.pow      = parc_trls.trial;
+
+%%
+
+cfg               = [];
+cfg.method        = 'ortho'; 
+%cfg.method      = 'surface';
+cfg.funparameter  = 'pow';
+cfg.anaparameter = 'tissue';
+cfg.renderer = 'zbuffer';
+cfg.projmethod    = 'nearest';
+%cfg.location      = [64 -32 8];
+cfg.atlas = intp_atlas;
+cfg.funcolormap   = 'jet';
+ft_sourceplot(cfg,source_avg_parc,intp_atlas);
+
+%%
+
+plot_dummy = parc_avg;
+plot_dummy.avg.pow = parc_avg.trial;
+plot_dummy.avg.label = parc_avg.label;
+
+cfg               = [];
+cfg.method        = 'ortho'; 
+%cfg.method      = 'surface';
+cfg.funparameter  = 'pow';
+cfg.anaparameter = 'tissue';
+cfg.renderer = 'zbuffer';
+cfg.projmethod    = 'nearest';
+%cfg.location      = [64 -32 8];
+cfg.atlas = intp_atlas;
+cfg.funcolormap   = 'jet';
+ft_sourceplot(cfg,plot_dummy,intp_atlas);x
