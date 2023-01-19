@@ -28,6 +28,7 @@ subs_avail = dir(megdir);
 % Example participant:
 exmpl_sub = subs_avail(7).name;
 datdir = [megdir exmpl_sub ff];
+
 % load some resting state MEG data, eyes open (4 & 5 are the following scans)
 fname = dir([datdir ff 'Rest*' ff 'rmeg*' ff exmpl_sub '*MEG_3' '*.mat']);
 fname_loaded = load([fname.folder ff fname.name])
@@ -52,6 +53,7 @@ smod = dir([datdir 'an*' ff exmpl_sub '*source*' '3d8*' '.mat']);
 tmp = load([smod.folder  ff smod.name]);
 sm = tmp.sourcemodel3d;
 sm = ft_convert_units(sm, 'mm');
+
 %% filter
 % note that we probably would not do this for task data and certianly would
 % use a different filter for any event-related design. Here, this might be
@@ -60,12 +62,14 @@ cfg = [];
 cfg.bpfilter = 'yes';
 cfg.bpfreq = [1 80];
 data = ft_preprocessing(cfg, data);
+
 %% get covariance
 cfg = [];
 cfg.preproc.demean = 'yes';
 cfg.preproc.baselinewindow = 'all';
 cfg.covariance = 'yes';
 tlck = ft_timelockanalysis(cfg, data);
+
 %% visualise the covariance matrix 
 % both of these are actually empty logical arrays
 selmag  = ft_chantype(tlck.label, 'megmag');
@@ -77,8 +81,10 @@ figure;imagesc(C);hold on;plot(102.5.*[1 1],[0 306],'w','linewidth',2);plot([0 3
 
 % check the singular values of the covariance matrix
 % plots the data on a log scale
+
 [u,s,v] = svd(tlck.cov);
 figure;plot(log10(diag(s)),'o');
+
 %% detect the location of the first large 'cliff'
 % currently also still empty because selmag and selgrad are empty
 [u,s_mag,v]  = svd(tlck.cov(selmag, selmag));
@@ -87,6 +93,7 @@ d_mag = -diff(log10(diag(s_mag))); d_mag = d_mag./std(d_mag);
 kappa_mag = find(d_mag>4,1,'first');
 d_grad = -diff(log10(diag(s_grad))); d_grad = d_grad./std(d_grad);
 kappa_grad = find(d_grad>4,1,'first');
+
 %% denoise and prewhiten data
 cfg            = [];
 cfg.channel    = 'meg';
@@ -104,6 +111,7 @@ cfg        = [];
 cfg.method = 'summary';
 cfg.layout = layout;
 dataw_meg  = ft_rejectvisual(cfg, dataw_meg);
+
 %% generate leadfield
 cfg             = [];
 cfg.channel     = tlck.label;
@@ -124,6 +132,7 @@ cfg.headmodel   = hm;
 cfg.method      = 'singleshell';
 cfg.singleshell.batchsize = 1000;
 leadfield_meg   = ft_prepare_leadfield(cfg);
+
 %% check leadfield
 selchan = match_str(data.grad.label, lf_meg.label);
 % selpos = find(leadfield.inside, 1, 'first');
@@ -141,6 +150,7 @@ figure
 subplot(1,3,1); ft_plot_topo3d(data.grad.chanpos(selchan,:), leadfield_meg.leadfield{selpos}(:,1));
 subplot(1,3,2); ft_plot_topo3d(data.grad.chanpos(selchan,:), leadfield_meg.leadfield{selpos}(:,2));
 subplot(1,3,3); ft_plot_topo3d(data.grad.chanpos(selchan,:), leadfield_meg.leadfield{selpos}(:,3));
+
 %% get reg kappa and run beamformer (LCMV)
 [u,s,v] = svd(tlck.cov);
 d       = -diff(log10(diag(s)));
@@ -160,6 +170,7 @@ cfg.lcmv.weightnorm = 'nai';
 cfg.headmodel   = hm;
 cfg.sourcemodel = lf_meg;
 source          = ft_sourceanalysis(cfg, tlck);
+
 %% surface
 % combine R and L hemispheres of template
 if exist('template_surface_inflated.mat')
@@ -168,6 +179,7 @@ else
     inflated = ft_read_headshape({fname strrep(fname, '.L.', '.R.')});
     save('template_surface_inflated.mat', 'inflated')
 end
+
 %% project single trials
 % Build empty structure for source data
 clear SourceTrialData
@@ -193,6 +205,7 @@ for tr = 1:NTrials
     display(['Projecting trial ' num2str(tr)])
     SourceTrialData.trial{tr}(:,:) = TrafoMatrix(:,:)*data.trial{tr};
 end
+
 %% save projected data
 
 if ~exist([datdir 'Source' ff])
@@ -208,12 +221,14 @@ save(filename, 'source', 'tlckw');
 
 % also save / source as dummy source
 save([datdir 'Source' ff 'CompVar_dummy_source_folcmv_sub_' exmpl_sub], 'source') 
+
 %% inspect source file 
 source.avg 
 source.avg.mom % contains the time courses of the event-related field at the source level
 % colloquially known as virtual channels
 source.avg.pow % the ‘pow’ field is a scalar per dipole position, reflects the variance over the time window of interest
                % and typically does not mean much
+               
 %% as a quick check: get alpha power
 cfg = [];
 cfg.method = 'mtmfft';
@@ -253,12 +268,14 @@ cfg = [];
 cfg.parameter = 'all';
 source_intp = ft_sourceinterpolate(cfg, dummy_source, ind_mri);
 source_intp.coordsys = 'mni';
+
 % normalize
 cfg = [];
 cfg.template = '/Volumes/LNDG/Projects/HCP/megconnectome-master/template/mni_icbm152_t1_tal_nlin_sym_09a.nii';
 cfg.templatecoordsys = 'mni';
 source_intp = ft_volumenormalise(cfg, source_intp);
-%% Plotting
+
+%% plotting
 % Note that surface plots (which is what one would really want) only seem
 % to work on source projected and alingned data that is still in long
 % format. Thus, fields such as .pow or .inside have to be of shape N*1, not
@@ -319,6 +336,7 @@ cfg = [];
 cfg.funparameter = 'pow'; % or 'pow'
 cfg.anaparameter = 'anatomy';
 ft_sourceplot(cfg, source_f_surf);
+
 %% Align real trial-wise time courses
 % Alpha power just acts as a quick check. Actually, we want to analyze the
 % time courses of activity. Hence, we'll have to align and transfrom these
@@ -326,6 +344,7 @@ ft_sourceplot(cfg, source_f_surf);
 % Note that this could also be done at a later stage in case it is faster /
 % more convenient then. Results will not differ as long as trasnformationm
 % interpolation, and normalization is done before plotting.
+
 %% Check FOOF things
 % Since very recently, Fieldtrip offers some FOOOF implementation, unlcear
 % what that exactly spits out, though.
@@ -354,6 +373,7 @@ if ~exist([datdir 'PSDs'])
 end
 save([datdir 'PSDs' ff 'CompVar_source_specs_' exmpl_sub], 'allps_sand',...
      '-v7.3')
+     
  %% Parcellate 
 % read atlas for parcellation
 brainnetome = ft_read_atlas('template/atlas/brainnetome/BNA_MPM_thr25_1.25mm.nii')
