@@ -1,0 +1,57 @@
+            %%%% PARCELLATE TRIALS AND PLOT THE PARCELLATION %%%%
+
+% this script continues from source projection script, so requires variables 
+% created and loaded in the source projection script.
+% script is also later created with cfgs.
+
+%% parcellate single trials
+
+% important step: set the match the positions in volume+label struct (source_plot) 
+% to those of the the source struct (dummy_source_trans)
+source_plot.pos  = dummy_source_trans.pos;
+
+cfg = [];
+cfg.method = 'pca';
+cfg.parcellation = 'tissue';
+parc_trls = ft_virtualchannel(cfg, tlck_all, dummy_source_trans, source_plot);
+
+
+%% obtain average from single parcellated trials
+
+% transform parc_trls into source space structure
+cfg               = [];
+cfg.trials        = 'all';
+% cfg.avgoverrpt  = 'yes'; % says that averaging over repetitions is not possible
+cfg.avgovertime   = 'yes';
+parc_avg          = ft_selectdata(cfg,parc_trls);
+
+
+% add pow field to new selected parcellated alpha power
+parc_avg.pow = dummy_source_trans.avg.pow; % check this step 
+
+
+% create dummy source struct that can be plotted
+clear dummy_parc_avg; 
+dummy_parc_avg.trial = parc_avg.trial;
+dummy_parc_avg.trial = parc_avg.trial;
+dummy_parc_avg.time = parc_avg.time;
+dummy_parc_avg.cfg = parc_avg.cfg;
+dummy_parc_avg.dim = dummy_source_trans.cfg; % alternative may be to use source_avg
+dummy_parc_avg.dim = dummy_source_trans.dim;
+dummy_parc_avg.inside = dummy_source_trans.inside;
+dummy_parc_avg.pos = dummy_source_trans.pos;
+dummy_parc_avg.pow = parc_avg.pow;
+
+
+%% plot the parcellated alpha power 
+
+cfg               = [];
+cfg.method        = 'ortho'; 
+cfg.method       = 'surface';
+cfg.funparameter  = 'pow';
+cfg.anaparameter  = 'inside';
+cfg.renderer      = 'zbuffer';
+cfg.projmethod    = 'nearest';
+cfg.funcolormap   = 'jet';
+ft_sourceplot(cfg,dummy_parc_avg);
+
