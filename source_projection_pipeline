@@ -261,7 +261,9 @@ source_plot.pow = reshape(dummy_source_trans.avg.pow,[n_lgth,1]);
 source_plot.eta = reshape(dummy_source_trans.avg.eta,[n_lgth,1]);
 source_plot     = rmfield(intp_atlas,'coordsys');
 
+
 %% plot average alpha power
+
 cfg              = [];
 cfg.method       = 'surface';
 % cfg.method       = 'ortho';
@@ -275,8 +277,7 @@ cfg.maskparameter  = 'mask';
 % cfg.grid          = lf_meg;
 cfg.camlight       = 'yes';
 cfg.interactive    = 'yes';
-% view from left
-ft_sourceplot(cfg,dummy_source_trans,intp_atlas);
+ft_sourceplot(cfg,dummy_source_trans,intp_atlas); % view from the left
 
 % plot the interpolated atlas a check
 cfg = [];
