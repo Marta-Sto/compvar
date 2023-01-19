@@ -1,6 +1,8 @@
-             %%%% SOURCE PROJECTION MAIN ROUTINE %%%% 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-%%%% routine for loading resting-state data per example subject %%%%
+                 %%%% SOURCE PROJECTION MAIN ROUTINE %%%% 
+
+   %%%% routine for loading resting-state data per example subject %%%%
 
 
 %% add fieldtrip and relevant paths 
@@ -16,7 +18,8 @@ ft_defaults
 addpath(genpath('/Volumes/LNDG/Projects/HCP/megconnectome-master/'));
 
 
-%% load all relevant data per subject
+%% load relevant data per subject
+
 rootdir = '/Volumes/LNDG/Projects/HCP/';
 ff = filesep; % depends on operating system (e.g., in this case Mac)
 
@@ -46,13 +49,17 @@ tmp = load([smod.folder  ff smod.name]);
 sm = tmp.sourcemodel3d;
 sm = ft_convert_units(sm, 'mm');
 
+disp('All subject data loaded');
+
 
 %% filter data
 
+% the raw data here also contains trial information
 cfg = [];
 cfg.bpfilter = 'yes';
 cfg.bpfreq = [1 80];
 data = ft_preprocessing(cfg, data);
+disp('Raw data filtered');
 
 
 %% get covariance
@@ -62,12 +69,35 @@ cfg.preproc.demean = 'yes';
 cfg.preproc.baselinewindow = 'all';
 cfg.covariance = 'yes';
 tlck = ft_timelockanalysis(cfg, data);
+disp('Timelock complete');
+
+
+%% tlck of all trials
+
+cfg = [];
+cfg.preproc.demean = 'yes';
+cfg.preproc.baselinewindow = 'all';
+cfg.covariance = 'yes';
+cfg.keeptrials = 'yes';
+tlck_all = ft_timelockanalysis(cfg, data);
+disp('Timelock of all trials complete');
 
 
 %% load atlas
 
 %atlas = ft_read_atlas([fieldtrip_dir '/template/atlas/brainnetome/BNA_MPM_thr25_1.25mm.nii']); % brainnetome
 atlas = ft_read_atlas([fieldtrip_dir 'template/atlas/aal/ROI_MNI_V4.nii']); %AAL
+disp('Atlas loaded');
+
+
+%% transform source and headmodels with subject transformation matrix
+
+sm_trans = ft_transform_geometry(T, sm);
+sm_trans.coordsys = 'mni';
+
+hm_trans = ft_transform_geometry(T, hm);
+hm_trans.coordsys = 'mni';
+disp('Head and source models transformed');
 
 
 %% apply atlas to subject sourcemodel
@@ -79,14 +109,15 @@ cfg = [];
 cfg.atlas      = atlas;
 cfg.roi        = atlas.tissuelabel; % here can specify a single label, i.e. single ROI
 cfg.inputcoord = 'mni';
-mask = ft_volumelookup(cfg,sm);
+% mask = ft_volumelookup(cfg,sm);
+mask = ft_volumelookup(cfg,sm_trans);
 
 % determine inside positions
-sm.inside          = false(sm.dim);
-sm.inside(mask==1) = true;
+sm_trans.inside          = false(sm_trans.dim);
+sm_trans.inside(mask==1) = true;
 
 % plot the atlas based grid
-figure; ft_plot_mesh(sm.pos(sm.inside,:));
+figure; ft_plot_mesh(sm_trans.pos(sm_trans.inside,:));
 
 
 %% load mri
@@ -96,6 +127,7 @@ figure; ft_plot_mesh(sm.pos(sm.inside,:));
 
 mri = ft_read_mri('T1w_acpc_dc_restore.nii.gz'); 
 mri.coordsys = 'mni';
+disp('Subject-specific MRI loaded');
 
 
 %% create sourcemodel to use 
@@ -107,6 +139,7 @@ cfg.warpmni   = 'yes';
 cfg.method    = 'basedonmri';
 cfg.unit      = 'mm';
 cfg.template  = sm;
+% cfg.template  = sm_trans;
 cfg.nonlinear = 'yes'; % use non-linear normalization
 cfg.mri       = mri;
 cfg.coordsys  = 'mni';
@@ -114,10 +147,11 @@ sourcemodel_to_use  = ft_prepare_sourcemodel(cfg);
 disp('Sourcemodel created');
 
 
-%% plot sourcemodel on headmodel
+%% visualise the sourcemodel on the headmodel
 
+% check for alignment between source and headmodel
 figure; hold on     % plot all objects in one figure
-ft_plot_headmodel(hm, 'facecolor','cortex','edgecolor','none'); alpha 0.5; camlight;   
+ft_plot_headmodel(hm_trans, 'facecolor','cortex','edgecolor','none'); alpha 0.5; camlight;   
 alpha 0.4           % make the surface transparent
 ft_plot_mesh(sourcemodel_to_use.pos(sourcemodel_to_use.inside,:));
 
@@ -125,10 +159,11 @@ ft_plot_mesh(sourcemodel_to_use.pos(sourcemodel_to_use.inside,:));
 %% generate leadfield based on sourcemodel_to_use
 
 cfg                = [];
-cfg.channel        = tlck.label;
-cfg.grad           = tlck.grad;
+cfg.channel        = tlck_all.label;
+cfg.grad           = tlck_all.grad;
 cfg.normalizeparam = 1;
 cfg.sourcemodel    = sourcemodel_to_use;
+% cfg.headmodel      = hm_trans;
 cfg.headmodel      = hm;
 cfg.reducerank     = 2;
 cfg.normalize      = 'yes';
@@ -139,7 +174,7 @@ disp('Leadfield prepared');
 %% check/visualise leadfield
 
 selchan = match_str(data.grad.label,lf_meg.label);
-% selpos = find(leadfield.inside, 1, 'first');
+% selpos = find(lf_meg.inside, 1, 'first');
 selpos = find(lf_meg.inside, 1, 'last');
 
 figure
@@ -147,12 +182,14 @@ subplot(1,3,1); ft_plot_topo3d(data.grad.chanpos(selchan,:), lf_meg.leadfield{se
 subplot(1,3,2); ft_plot_topo3d(data.grad.chanpos(selchan,:), lf_meg.leadfield{selpos}(:,2));
 subplot(1,3,3); ft_plot_topo3d(data.grad.chanpos(selchan,:), lf_meg.leadfield{selpos}(:,3));
 
+
 %% get reg kappa and run beamformer (LCMV)
 
 [u,s,v] = svd(((tlck.cov)));
 d       = -diff(log10(diag(s)));
 d       = d./std(d);
 kappa   = find(d>5,1,'first');
+
 
 %% run source analysis 
 
@@ -164,10 +201,11 @@ cfg.lcmv.keepfilter = 'yes';
 cfg.lcmv.fixedori   = 'yes';
 % cfg.lcmv.weightnorm = 'unitnoisegain';
 cfg.lcmv.weightnorm = 'nai'; % minimise the centre of the head bias 
-%cfg.grid            = lf_meg;
+% cfg.grid            = lf_meg;
+% cfg.headmodel       = hm_trans;
 cfg.headmodel       = hm;
-cfg.sourcemodel     = sourcemodel_to_use;
-source_avg          = ft_sourceanalysis(cfg,tlck);
+cfg.sourcemodel     = lf_meg;
+source_avg          = ft_sourceanalysis(cfg,tlck_all);
 disp('Completed source averaging');
 
 
@@ -197,7 +235,7 @@ disp('Completed source averaging');
      display(['Projecting trial ' num2str(tr)])
      SourceTrialData.trial{tr}(:,:) = TrafoMatrix(:,:)*data.trial{tr};
  end
- disp('Done with source projecting single trials');
+ disp('Done source projecting single trials');
 
 
 %% get alpha power
@@ -241,47 +279,58 @@ dummy_source_trans = ft_transform_geometry(T, dummy_source);
 %% interpolate atlas
 
 % make the atlas low res
-% now the atlas is interpolated with alpha power activity
+% now the atlas is interpolated with alpha activity
 cfg              = [];
 cfg.parameter    = 'all';
 cfg.interpmethod = 'nearest';
-intp_atlas       = ft_sourceinterpolate(cfg,atlas,dummy_source_trans);
-%intp_atlas.pos   = dummy_source.pos;
+% intp_atlas       = ft_sourceinterpolate(cfg,atlas,dummy_source_trans);
+% if the atlas is interpolated the other way around, it is upscaled
 intp_atlas.coordsys = 'mni';
 disp('Source activity interpolated onto atlas');
+%intp_atlas.pos   = dummy_source.pos;
 
 
 %% reshape fields of structure by hand 
 
 n_lgth             = size(dummy_source_trans.inside,1)*size(dummy_source_trans.inside,2)*...
                      size(dummy_source_trans.inside,3);
-source_plot        = dummy_source_trans;
+source_plot        = intp_atlas;
 source_plot.inside = reshape(dummy_source_trans.inside,[n_lgth,1]);
-source_plot.pow = reshape(dummy_source_trans.avg.pow,[n_lgth,1]);
-source_plot.eta = reshape(dummy_source_trans.avg.eta,[n_lgth,1]);
-source_plot     = rmfield(intp_atlas,'coordsys');
+source_plot.pow    = reshape(dummy_source_trans.avg.pow,[n_lgth,1]);
+source_plot.eta    = reshape(dummy_source_trans.avg.eta,[n_lgth,1]);
+source_plot        = rmfield(source_plot,'coordsys');
 
 
 %% plot average alpha power
 
 cfg              = [];
-cfg.method       = 'surface';
+cfg.method     = 'surface';
+% cfg.method       = 'ortho';
+%cfg.atlas        = atlas; % when using this, one is prompted to set axis labels
+cfg.anaparameter = 'tissue';
+cfg.funparameter = 'pow';
+cfg.projmethod   = 'project';
+%cfg.renderer    = 'opengl';
+cfg.sphereradius = 1;
+cfg.maskparameter  = 'mask';
+% cfg.grid          = lf_meg;
+cfg.camlight       = 'yes';
+cfg.interactive    = 'yes';
+ft_sourceplot(cfg,dummy_source_trans); % view from the left
+
+% plot interpolated atlas as a quick check
+cfg              = [];
+cfg.method     = 'surface';
 % cfg.method       = 'ortho';
 cfg.anaparameter = 'tissue';
 cfg.funparameter = 'pow';
 cfg.projmethod   = 'project';
-%cfg.renderer     = 'opengl';
+%cfg.renderer    = 'opengl';
 cfg.sphereradius = 1;
-cfg.maskparameter  = 'mask';
-%cfg.surfdownsample = 10;
+% cfg.maskparameter  = 'mask';
 % cfg.grid          = lf_meg;
 cfg.camlight       = 'yes';
 cfg.interactive    = 'yes';
-ft_sourceplot(cfg,dummy_source_trans,intp_atlas); % view from the left
+% ft_sourceplot(cfg,source_plot); % view from the left
+ft_sourceplot(cfg,source_plot, dummy_source_trans);
 
-% plot the interpolated atlas a check
-cfg = [];
-cfg.method = 'ortho';
-cfg.funparameter = 'pow';
-cfg.anaparameter = 'anatomy';
-ft_sourceplot(cfg,intp_atlas);
