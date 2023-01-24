@@ -1,0 +1,99 @@
+            %%%% PARCELLATE TRIALS AND PLOT THE PARCELLATION %%%%
+
+% this script continues from source projection script, so requires variables 
+% created and loaded in the source projection script.
+% script is also later created with cfgs.
+% can later create functions from the script.
+
+%% parcellate single trials
+
+% important to match the positions in volume+label struct (source_plot) 
+% to those of the the source struct (dummy_source_trans)
+source_plot.pos  = dummy_source_trans.pos;
+
+cfg = [];
+cfg.method = 'pca';
+cfg.parcellation = 'tissue';
+parc_trls = ft_virtualchannel(cfg, tlck_all, dummy_source_trans,source_plot);
+disp('Done with source parcellation');
+
+%% obtain average from single parcellated trials
+
+% transform parc_trls into source space structure
+cfg               = [];
+cfg.trials        = 'all';
+% cfg.avgoverrpt  = 'yes'; % apparently averaging over repetitions isn't possible
+cfg.avgovertime   = 'yes';
+parc_avg          = ft_selectdata(cfg,parc_trls);
+
+% add pow field to new selected parcellated alpha power
+parc_avg.pow = dummy_source_trans.avg.pow;
+% or 
+% parc_avg.pow = parc_trls.brainordinate.pow;
+
+
+%% use ft_sourceparcellate to obtain the pow field
+
+% align the pos of the dummy transformed source and the interpolated atlas
+intp_atlas.pos = dummy_source_trans.pos;
+
+% run parcellation on transformed source data and the interpolated atlas
+cfg = [];
+cfg.parcellation = 'tissue';
+dummy_parc = ft_sourceparcellate(cfg,dummy_source_trans,intp_atlas); % use the low-res atlas 
+                                                                     % interpolated onto the source activity
+                                                                     % as they have the same dimensions
+                                                                     
+
+%% create new dummy struct to plot
+
+% create dummy that is a source struct that can be plotted
+
+% potential alternative method would be to combine the ft_sourceparcellate 
+% and ft_virtualchannel outputs -- with the first, we keep the pow value
+% per parcel, and with the second, we keep trial information, 
+% (which can later be altered when defining trial length).
+
+
+% when trying to use the ft_sourceparcellate output, 
+% error about not being able to determine units 
+% - says there are no repetitions in the data
+
+% create dummy struct (source) with the relevant fields for plotting
+clear dummy_parc_avg; 
+dummy_parc_avg.trial = parc_avg.trial;
+dummy_parc_avg.time = 0; 
+dummy_parc_avg.cfg   = dummy_parc.cfg;
+dummy_parc_avg.dim   = dummy_source_trans.dim;
+dummy_parc_avg.pos    = dummy_source_trans.pos;
+dummy_parc_avg.label = dummy_parc.label;
+dummy_parc_avg.label = parc_trls.brainordinate.tissuelabel;
+dummy_parc_avg.pow   = parc_trls.brainordinate.pow;
+dummy_parc_avg.pos    = parc_trls.brainordinate.pos;
+% dummy_parc_avg.pow   = (dummy_parc.pow)';
+% dummy_parc_avg.pow    = parc_avg.pow;
+
+disp('Done creating dummy struct');
+
+
+%% plot the parcellated alpha power 
+
+
+cfg              = [];
+% cfg.method     = 'ortho';
+cfg.method       = 'surface';
+cfg.anaparameter = 'tissue';
+cfg.funparameter = 'pow';
+cfg.projmethod   = 'project';
+%cfg.renderer    = 'opengl';
+cfg.sphereradius = 1;
+cfg.camlight       = 'yes';
+cfg.interactive    = 'yes';
+cfg.funcolormap    = 'jet';
+cfg.funcolorlim    = [0.0 1.2];
+cfg.opacitylim     = [0.0 1.2];
+cfg.opacitymap     = 'rampup';
+view ([90 0])        
+material dull 
+colormap hot
+ft_sourceplot(cfg,dummy_parc_avg);
