@@ -18,19 +18,29 @@ ff = filesep; % based on the operating system (different for Mac v Windows)
 
 ft_defaults()
 
-%% run pwelch on the parcellated trials
+%% pass cfg 
+parcfile = cfg.parcfile;
+subjno     = cfg.subjno;
+
+%% load relevant parcellated trial data
+% load file with parcellated data
+parc_trls = load(parcfile); 
+disp('Parcellated trial data loaded');
+
+%% runs pwelch on the parcellated trials
 % The function squeezes the data to remove singleton dimensions.
 % The window length here is specified with a length of 500 samples, with an
 % overlap of 50%. the frequencies are returned in steps of .5. 
 % The estimates of power spectral density are returned in spec, and the
 % corresponding frequencies are returned in f. 
+
 % spec is a two-dimensional array of the shape nFreqs x nParcels,
 % while f is a one-dimensional array of the shape nFreqs.
 
 [spec,f] = pwelch((squeeze(parc_trls.trial(1,:,:)))',[],[],[1:.5:100],500);
+disp('PWelch function ran over the squeezed trial dimension');
 
 %% save the PSD estimates for each parcel per subject
-
 % save parcellated alpha data
 save([datdir 'PSD' ff 'CompVar_PSD_spec' ff cell2mat(subjno)], 'spec',...
         '-V7.3')
