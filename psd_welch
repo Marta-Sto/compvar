@@ -11,7 +11,7 @@ fieldtrip_dir = '/home/mpib/stojanovic/fieldtrip-20220104/';
 % fieldtrip_dir = '/Volumes/LNDG/Projects/HCP/Sourceproject/fieldtrip-20220104/';
 addpath(fieldtrip_dir);
 
-datdir = '/home/mpib/stojanovic/SOURCEDATA/';
+datdir = '/home/mpib/stojanovic/PSDDATA/';
 addpath(datdir);
 
 ff = filesep; % based on the operating system (different for Mac v Windows)
