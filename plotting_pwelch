@@ -1,0 +1,59 @@
+%%%%% Script to match spec data from the pwelch function to appropriate data labels %%%%%
+
+%% match the indices of parcels to the data in 'spec' from the pwelch function
+% alternative is to use the match_str function
+
+% Find the indices of the frontal and occipital parcels in the spec structure
+frontal_idx = find(strcmp(parc_trls.label, 'SFG, Right Superior Frontal Gyrus A9l, lateral area 9'));
+occipital_idx = find(strcmp(parc_trls.label, 'LOcC, Right lateral Occipital Cortex iOccG, inferior occipital gyrus'));
+
+%% extract the data for the frontal and occipital parcels from the data structure
+% use the indices just identified
+% the data here should refer to the variable with data for all parcels 
+% (double-check that this should in fact be the parc_trls variable)
+
+frontal_data = squeeze(parc_trls.trial(:,frontal_idx,:))';
+occipital_data = squeeze(parc_trls.trial(:,occipital_idx,:))';
+
+%% compute the PSDs for the frontal and occipital parcels to contrast them
+% can conduct a t-test or visualise the difference between the frontal and
+% occipital parcels
+
+[frontal_spec, f]   = pwelch((squeeze(frontal_data(:,:)))',[],[],[1:.5:100],500);
+[occipital_spec, f] = pwelch((squeeze(occipital_data(:,:)))',[],[],[1:.5:100],500);
+
+%% plot the frontal and occipital activity 
+
+% plot the PSD for the frontal parcels in blue
+plot(f, frontal_spec, 'b');
+hold on;
+
+% plot the PSD for the occipital parcels in red
+plot(f, occipital_spec, 'r');
+
+% add a legend and axis labels
+legend({'Frontal', 'Occipital'});
+xlabel('Frequency (Hz)');
+ylabel('Power Spectral Density');
+
+%% plot the frontal and occipital activity in log-log space
+
+clear nfft; clear fs;
+nfft = [1:.5:100]; 
+fs   = 500;
+
+clear f;
+% create a frequency vector
+f = logspace(log10(1), log10(fs/2), nfft/2+1);
+
+% plot the PSD for the frontal parcels in blue
+loglog(f, frontal_psd, 'b');
+hold on;
+
+% plot the PSD for the occipital parcels in red
+loglog(f, occipital_psd, 'r');
+
+% add a legend and axis labels
+legend({'Frontal', 'Occipital'});
+xlabel('Frequency (Hz)');
+ylabel('Power Spectral Density');
