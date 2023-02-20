@@ -1,0 +1,244 @@
+function final_source_run(cfg)
+%FINAL_SOURCE_RUN Function that runs source parcellation across subjects.
+% Timelocks data in two-second trials for preprocessing, then later
+% runs functions on longer, ten-second trials, redefined earlier in the script.
+
+%% add relevant paths and define information
+clc
+
+basepath = '/home/mpib/stojanovic';
+
+fieldtrip_dir = '/home/mpib/stojanovic/fieldtrip-20220104/';
+% fieldtrip_dir = '/Volumes/LNDG/Projects/HCP/Sourceproject/fieldtrip-20220104/';
+addpath(fieldtrip_dir);
+
+datdir = '/home/mpib/stojanovic/SOURCEDATA/';
+addpath(datdir);
+
+ff = filesep; % based on the operating system (different for Mac v Windows)
+
+ft_defaults()
+
+%% pass configuration list
+% set up configurations
+restfile   = cfg.restfile; 
+anatfile   = cfg.anatfile;
+headfile   = cfg.headmod;
+smodfile   = cfg.smod;
+atlasfile  = cfg.atlas;   
+subjno     = cfg.subjno;
+
+disp(cfg.MODIN);
+cd(cfg.MODOUT);
+
+%% load relevant data per subject
+% data per subject 
+% restfile ='/Volumes/LNDG/Projects/HCP/Sourceproject/MEG/108323/Restin/rmegpreproc/108323_MEG_3-Restin_rmegpreproc.mat';
+load(restfile);
+
+% transformation matrix per subject
+tmat = hcp_read_ascii(anatfile); 
+T = tmat.transform.bti2spm;
+
+% head model 
+tmp = load(headfile);
+hm = tmp.headmodel;
+hm = ft_convert_units(hm, 'mm');
+
+% source model
+tmp = load(smodfile);
+sm = tmp.sourcemodel3d;
+sm = ft_convert_units(sm, 'mm');
+disp('Headmodel and sourcemodel ready');
+
+%% filter resting-state data
+clear two_seconds;
+cfg = [];
+cfg.bpfilter = 'yes';
+cfg.bpfreq = [1 80];
+cfg.demean = 'yes'; % baseline correct data
+cfg.baselinewindow = [0 0.0098];
+two_seconds        = ft_preprocessing(cfg,data);
+disp('Done preprocessing and baseline correcting trials');
+
+%% redefine trials to 10-second length 
+clear ten_seconds;
+cfg = [];
+cfg.dataset = restfile;
+cfg.trialdef.length = 10;
+ten_seconds = ft_definetrial(cfg);
+disp('Done redefining trial length');
+
+%% redefine trials to 10-second length
+clear redef_data;
+cfg = [];
+cfg.trl = ten_seconds.trl;
+redef_data = ft_redefinetrial(cfg,data);
+disp('Done redefining trial length');
+
+%% preprocess redefined 10-second trials
+clear ten_sec_trls;
+cfg = [];
+cfg.preproc.demean = 'yes';
+cfg.preproc.baselinewindow = 'all';
+cfg.baselinewindow = [0 0.0098];
+ten_sec_trls = ft_preprocessing(cfg,redef_data);
+disp('Done preprocessing and baseline correcting longer trials');
+
+%% get covariance
+clear tlck_two_sec;
+cfg = [];
+cfg.preproc.demean         = 'yes';
+cfg.preproc.baselinewindow = 'all';
+cfg.covariance             = 'yes';
+tlck_two_sec               = ft_timelockanalysis(cfg,two_seconds);
+disp('Done timelocking data');
+
+%% get covariance across all trials
+clear tlck_two_sec_all;
+cfg = [];
+cfg.preproc.demean         = 'yes';
+cfg.preproc.baselinewindow = 'all';
+cfg.covariance   = 'yes';
+cfg.keeptrials   = 'yes'; % important to keep the trial info
+tlck_two_sec_all = ft_timelockanalysis(cfg,two_seconds);
+disp('Done timelocking all trials');
+s
+%% get covariance of 10-second trials
+clear tlck_ten_sec;
+cfg = [];
+cfg.preproc.demean         = 'yes';
+cfg.preproc.baselinewindow = 'all';
+cfg.covariance             = 'yes';
+tlck_ten_sec = ft_timelockanalysis(cfg,ten_sec_trls);
+disp('Done timelocking 10-second trials');
+
+%% get covariance across all 10-second trials
+clear tlck_ten_all;
+cfg = [];
+cfg.preproc.demean         = 'yes';
+cfg.preproc.baselinewindow = 'all';
+cfg.covariance  = 'yes';
+cfg.keeptrials  = 'yes'; % important to keep the trial info
+tlck_ten_all    = ft_timelockanalysis(cfg,ten_sec_trls);
+disp('Done timelocking all 10-second trials');
+
+%% get reg kappa and run beamformer (LCMV)
+clear kappa;
+[u,s,v] = svd(((tlck_two_seconds.cov)));
+d       = -diff(log10(diag(s)));
+d       = d./std(d);
+kappa   = find(d>5,1,'first');
+
+%% generate leadfield
+clear lf_meg;
+clear lf_meg_trans;
+cfg             = [];
+cfg.channel     = tlck_two_seconds.label;
+cfg.grad        = tlck_two_seconds.grad;
+cfg.normalizeparam = 1;
+cfg.sourcemodel = sm;
+cfg.headmodel   = hm;
+cfg.reducerank = 2;
+cfg.normalize  = 'yes';
+lf_meg       = ft_prepare_leadfield(cfg);
+lf_meg_trans = ft_transform_geometry(T,lf_meg);
+disp('Done creating leadfield');
+
+%% also transform headmodel
+clear hm_trans;
+hm_trans = ft_transform_geometry(T,hm);
+disp('Done transforming head model');
+
+%% run source analysis
+clear source_avg;
+cfg                 = [];
+cfg.lcmv.lambda = '5%';
+cfg.lcmv.kappa = kappa;
+cfg.method          = 'lcmv';
+cfg.lcmv.keepfilter = 'yes';
+cfg.lcmv.fixedori   = 'yes';
+cfg.lcmv.weightnorm = 'unitnoisegain';
+cfg.headmodel   = hm_trans;
+cfg.sourcemodel = lf_meg_trans;
+% create source average based on shorter, two-second trials
+source_avg      = ft_sourceanalysis(cfg, tlck_two_sec_all);
+disp('Done averaging source data');
+
+%% read atlas 
+clear brainnetome;
+brainnetome = ft_read_atlas([fieldtrip_dir '/template/atlas/brainnetome/BNA_MPM_thr25_1.25mm.nii']);
+disp('Atlas read');
+
+%% interpolate source average onto atlas
+clear atlas_lowres;
+cfg = [];
+cfg.parameter = 'all';
+cfg.interpmethod = 'nearest';
+atlas_lowres = ft_sourceinterpolate(cfg, brainnetome, source_avg);
+
+% align positions of the atlas and the source average
+atlas_lowres.pos = source_avg.pos;
+disp('Done interpolating source data onto the atlas');
+
+%% parcellate single trials
+% parcellate trials based on 10-second snippets
+clear parc_trls;
+cfg = [];
+cfg.method = 'pca'; % can be either svd or pca
+cfg.parcellation = 'tissue';
+parc_trls = ft_virtualchannel(cfg, tlck_ten_all, source_avg, atlas_lowres);
+disp('Done parcellating single trial data');
+
+%% save the parcellated single trial data
+% create directory to save the source data (if it doesn't already exist)
+if ~exist([datdir 'Source_parc_data' ff])
+    mkdir([datdir 'Source_parc_data' ff])
+end
+save([datdir 'Source_parc_data' ff 'CompVar_source_parc_trls' '_' cell2mat(subjno)], 'parc_trls',...
+        '-V7.3')
+
+%% obtain alpha data from parcellated data
+clear trlwise_pow;
+clear alpha_parc;
+% conduct frequency analysis on single trial source data
+cfg         = [];
+cfg.method  = 'mtmfft';
+cfg.taper   = 'hanning';
+cfg.foi     = 8:1:12;
+cfg.output  = 'pow';
+cfg.tapsmofrq  = 2;
+cfg.keeptrials = 'yes';
+cfg.pad        = 'nextpow2';
+trlwise_pow    = ft_freqanalysis(cfg,parc_trls);
+
+% average over the alpha frequency data
+cfg             = [];
+cfg.frequency   = [8,12];
+cfg.avgoverfreq = 'yes';
+cfg.avgoverrpt  = 'yes';
+alpha_parc      = ft_selectdata(cfg,trlwise_pow);
+% can also try to replace with ft_freqdescriptives
+disp('Done obtaining alpha power from the parcellated trials');
+
+%% create dummy source from alpha power
+% currently plots as only a singular value, which is of course incorrect
+clear dummy_source;
+activation        = alpha_parc.powspctrm;
+dummy_source      = source_avg;
+dummy_source.avg.pow = activation;
+dummy_source.time    = 0;
+disp('Done creating dummy');
+
+%% save alpha data
+if ~exist([datdir 'Parc_alpha_trls' ff])
+    mkdir([datdir 'Parc_alpha_trls' ff])
+end
+% save parcellated alpha data
+save([datdir 'Parc_alpha_trls' ff 'CompVar_alpha_parc' '_' cell2mat(subjno)], 'alpha_parc',...
+        '-V7.3')
+% also save dummy source
+save([datdir 'Parc_alpha_trls' ff 'CompVar_dummy_source' '_' cell2mat(subjno)], 'dummy_source',...
+        '-V7.3')
+
+end
