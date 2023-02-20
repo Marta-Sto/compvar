@@ -1,7 +1,7 @@
 function final_source_run(cfg)
 %FINAL_SOURCE_RUN Function that runs source parcellation across subjects.
-% Timelocks data in two-second trials for preprocessing, then later
-% runs functions on longer, ten-second trials, redefined earlier in the script.
+% Uses two-second trials for preprocessing, then conducts later analyses 
+% with longer, ten-second trials.
 
 %% add relevant paths and define information
 clc
@@ -92,7 +92,7 @@ cfg.preproc.demean         = 'yes';
 cfg.preproc.baselinewindow = 'all';
 cfg.covariance             = 'yes';
 tlck_two_sec               = ft_timelockanalysis(cfg,two_seconds);
-disp('Done timelocking data');
+disp('Done timelocking two-second data');
 
 %% get covariance across all trials
 clear tlck_two_sec_all;
@@ -102,8 +102,8 @@ cfg.preproc.baselinewindow = 'all';
 cfg.covariance   = 'yes';
 cfg.keeptrials   = 'yes'; % important to keep the trial info
 tlck_two_sec_all = ft_timelockanalysis(cfg,two_seconds);
-disp('Done timelocking all trials');
-s
+disp('Done timelocking all two-second trials');
+
 %% get covariance of 10-second trials
 clear tlck_ten_sec;
 cfg = [];
@@ -125,7 +125,7 @@ disp('Done timelocking all 10-second trials');
 
 %% get reg kappa and run beamformer (LCMV)
 clear kappa;
-[u,s,v] = svd(((tlck_two_seconds.cov)));
+[u,s,v] = svd(((tlck_two_sec.cov)));
 d       = -diff(log10(diag(s)));
 d       = d./std(d);
 kappa   = find(d>5,1,'first');
@@ -134,8 +134,8 @@ kappa   = find(d>5,1,'first');
 clear lf_meg;
 clear lf_meg_trans;
 cfg             = [];
-cfg.channel     = tlck_two_seconds.label;
-cfg.grad        = tlck_two_seconds.grad;
+cfg.channel     = tlck_two_sec.label;
+cfg.grad        = tlck_two_sec.grad;
 cfg.normalizeparam = 1;
 cfg.sourcemodel = sm;
 cfg.headmodel   = hm;
@@ -175,7 +175,7 @@ clear atlas_lowres;
 cfg = [];
 cfg.parameter = 'all';
 cfg.interpmethod = 'nearest';
-atlas_lowres = ft_sourceinterpolate(cfg, brainnetome, source_avg);
+atlas_lowres = ft_sourceinterpolate(cfg,brainnetome,source_avg);
 
 % align positions of the atlas and the source average
 atlas_lowres.pos = source_avg.pos;
@@ -187,7 +187,7 @@ clear parc_trls;
 cfg = [];
 cfg.method = 'pca'; % can be either svd or pca
 cfg.parcellation = 'tissue';
-parc_trls = ft_virtualchannel(cfg, tlck_ten_all, source_avg, atlas_lowres);
+parc_trls = ft_virtualchannel(cfg,tlck_ten_all,source_avg,atlas_lowres);
 disp('Done parcellating single trial data');
 
 %% save the parcellated single trial data
