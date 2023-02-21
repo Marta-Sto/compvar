@@ -1,0 +1,68 @@
+function psd_pwelch(cfg)
+%RUN_PWELCH Function that runs pwelch across subjects on the source
+% parcellated data and saved the results in PSD files.
+% input takes configurations with parcellated alpha power trials.
+
+%% add relevant paths and define information
+clc
+basepath = '/home/mpib/stojanovic';
+
+fieldtrip_dir = '/home/mpib/stojanovic/fieldtrip-20220104/';
+% fieldtrip_dir = '/Volumes/LNDG/Projects/HCP/Sourceproject/fieldtrip-20220104/';
+addpath(fieldtrip_dir);
+
+datdir = '/home/mpib/stojanovic/PSDDATA/';
+addpath(datdir);
+
+ff = filesep; % based on the operating system (different for Mac v Windows)
+
+ft_defaults()
+
+%% pass cfg
+% pass necessary cfgs of parcellated data and subject number
+parcfile   = cfg.parcfile;
+subjno     = cfg.subjno;
+
+%% load relevant parcellated trial data
+% load file with parcellated data
+clear tmp;
+tmp = load(parcfile); 
+parc_trls = tmp.parc_trls;
+disp('Parcellated trial data loaded');
+
+%% run pwelch in a loop across trials
+num_trials = size(parc_trls.trial, 1); % get the total number of trials
+spec_all   = cell(num_trials, 1);      % initialize a cell array to store the spectra for each trial
+f_all      = cell(num_trials, 1);      % initialize a cell array to store the frequency vector for each trial
+
+% run in a loop across the number of trials
+for i = 1:num_trials
+    data        = squeeze(parc_trls.trial(i, :, :))';    % extract the data for specific trial
+    [spec, f]   = pwelch(data, [], [], [1:.5:100], 500); % run pwelch on the data
+    spec_all{i} = spec; % store the spectra for this trial in the cell array
+    f_all{i}    = f;    % store the frequency vector for this trial in the cell array
+end
+disp('PWelch function ran over the squeezed trial dimension');
+
+%% runs pwelch on the parcellated trials
+% pwelch squeezes the data to remove singleton dimensions.
+% the window length here is specified with a length of 500 samples, with an
+% overlap of 50%. the frequencies are returned in steps of .5. 
+% the estimates of power spectral density are returned in spec, and the
+% corresponding frequencies are returned in f. 
+
+% spec is a two-dimensional array of the shape nFreqs x nParcels,
+% while f is a one-dimensional array of the shape nFreqs.
+
+% [spec,f] = pwelch((squeeze(parc_trls.trial(1,:,:)))',[],[],[1:.5:100],500);
+% disp('PWelch function ran over the squeezed trial dimension');
+
+%% save the PSD estimates for each parcel per subject
+% save parcellated alpha data
+save([datdir 'CompVar_PSD_spec' '_' cell2mat(subjno)], 'spec',...
+        '-V7.3')
+% also save dummy source
+save([datdir 'CompVar_PSD_f' '_' cell2mat(subjno)], 'f',...
+        '-V7.3')
+
+end
