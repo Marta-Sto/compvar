@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Feb 21 23:35:58 2023
+
+Script that runs FOOOF analysis across subjects. Loads PSD estimates
+and associated frequencies per subject from the output of pwelch.
+
+@author: stojanovic
+"""
+# Import relevant packages
+import numpy as np
+import scipy.io as spio
+import mat73
+from fooof import FOOOF
+from fooof import FOOOFGroup
+
+# List relevant subjects
+# subjects   = ['100307','102816','105923','106521','108323','109123','112920','113922'];
+subjects     = ['106521']
+
+for s in range(0, np.size(subjects)):
+    
+    sub = subjects[s]
+    
+    # Define directory for PSD subject data (output of pwelch) on TARDIS remote server
+    #spec_dir     = 'home/mpib/stojanovic/PSDDATA/pwelch_spec_data/'
+    #freq_dir     = 'home/mpib/stojanovic/PSDDATA/pwelch_f_data/'
+    #out_dir      = 'home/mpib/stojanovic/PSDDATA/fooof_data/'
+    
+    sub_dir = '/Users/stojanovic/Documents/Projects/MaxPlanck/Data/'
+    
+    # Load the PSD estimates and corresponding frequencies from separate .mat files
+    #psd_file   = spec_dir + 'CompVar_PSD_spec_' + str(sub) + '.mat'
+    #freqs_file = freq_dir + 'CompVar_PSD_f_' + str(sub) + '.mat'
+    
+    psd_file   = sub_dir + 'CompVar_PSD_spec_' + str(sub) + '.mat'
+    freqs_file = sub_dir + 'CompVar_PSD_f_' + str(sub) + '.mat'
+
+    psds  = mat73.loadmat(psd_file)
+    freqs = mat73.loadmat(freqs_file)
+    
+    psds  = psds['spec']
+    freqs = freqs['f']
+    
+    # The loaded data may contain extra dimensions, so need to flatten them
+    psds = np.asarray(np.squeeze(psds))
+    freqs = np.asarray(np.squeeze(freqs))
+    
+    print('Shape of psds array:', psds.shape)
+    print('Shape of freqs array:', freqs.shape)
+    
+    # Initialize a FOOOF object to fit individual power spectra
+    fm = FOOOF()
+    
+    # Create a FOOOFGroup object to fit power spectra across all subjects
+    fg = FOOOFGroup(peak_width_limits = [1,8], min_peak_height = 0.05, max_n_peaks = 8)
+    
+    # define the frequency range
+    freq_range      = [3,40] # could also be 2 Hz - test outs
+
+    # initialize input arrays
+    exps_array      = np.empty((199,np.size(psds,1)))
+    offset_array    = np.empty((199,np.size(psds,1)))
+    r_squared_array = np.empty((199,np.size(psds,1)))
+        
+    osc_peaks_list  = list()
+
+    for parcel in range(psds.shape[1]):
+        parcel_psds = psds[:, parcel]
+        parcel_psds = np.squeeze(parcel_psds)
+        fg.fit(freqs, parcel_psds, freq_range, n_jobs=1,progress=None)
+        # do something with the results, e.g. fg.get_results()
+    
+        # Loop over the rows of the psds and freqs arrays to fit each participant's data
+        for i in range(psds.shape[0]):
+        
+            # Add the FOOOF model to the FOOOFGroup object for fitting across all participants
+            fg.add_data(freqs, psds[i,:])
+    
+    # Fit the FOOOFGroup model to the power spectra across all participants
+    fg.fit()
+    
+    # Save data per subject
+    all_dat = {}
+    all_dat['slopes']       = exps_array
+    all_dat['oscillations'] = osc_peaks_list
+    all_dat['offset']       = offset_array
+    all_dat['rsquared']     = r_squared_array
+    
+    # save data into the appropriate directory
+    # savname = out_dir + 'CompVar_fooof_results_sub_' + str(sub) + '.mat'
+    savname = sub_dir + 'CompVar_fooof_results_sub_' + str(sub) + '.mat'
+    spio.savemat('PSD_specs', all_dat)
+    
+    
+    del all_dat
