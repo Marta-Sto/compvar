@@ -1,0 +1,26 @@
+function run_entropy_analyses(cfg,bdata)
+%RUN_ENTROPY_ANALYSES Run the mMSE across subjects.
+% the input bdata is preprocessed data from a subject's resting-state session,
+% preprocessed using the ft_preprocessing function. 
+
+%% add path to the MSE toolbox 
+addpath(genpath('/Users/stojanovic/Documents/Projects/MaxPlanck/Toolboxes/mMSE')); 
+
+%% run ft_entropyanalysis
+
+clear mmse;
+cfg = [];
+cfg.m                 = 2;                 % pattern length (default) - means that 2-element patterns
+                                           % are counted and compared with the number of 3-element patterns
+cfg.r                 = 0.5;               % similarity parameter (default; indicates half the SD)
+cfg.timwin            = 0.5;               % sliding window size
+cfg.toi               = 1:0.05:2;          % set this according to your trial length
+cfg.timescales        = 1:2;               % timescale list
+cfg.recompute_r       = 'perscale_toi_sp'; % when to recompute similarity parameter
+cfg.coarsegrainmethod = 'filtskip';        % pointavg or filtskip
+cfg.filtmethod        = 'lp';              % choose low pass filter for pointskip
+cfg.mem_available     = 8e9;               % memory available, in bytes (perhaps modify)
+cfg.allowgpu          = true;              % in doscumentation also says to use 1 as default
+mmse = ft_entropyanalysis(cfg, bdata);
+
+end
