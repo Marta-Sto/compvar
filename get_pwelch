@@ -1,0 +1,115 @@
+function [allps_sand] = get_pwelch()
+% GET_PWELCH Run the pwelch function across subjects.
+
+%% initialize frequencies and the sampling rate
+
+freqs = 1:.5:100; % frequencies from 1 to 100 in steps of 0.5
+fs = 500;
+disp('Done initializing frequencies and sampling rate'); 
+
+%% list subjects
+% sub_list    = {'100307'; '102816'; '105923'; '106521'; '108323'; '109123'; '112920'; '113922'};
+sub_list = {'100307'};
+
+%% initalize subject list and data directory
+
+% create loop for Mac (local) versus TARDIS (remote server)
+
+if ismac
+    
+    dat_dir         = '/Users/stojanovic/Documents/Projects/MaxPlanck/Data/';
+    addpath(dat_dir);
+    file_prefix     = 'CompVar_source_parc_trls_'; % might not need to be specified here
+    % file_prefix = 'CompVar_PSD_spec_';
+    MODIN   = fullfile(dat_dir);
+    MODOUT  = fullfile(dat_dir);
+    
+    ff = filesep;
+    backend = 'local';
+    compile = 'no';
+
+else % TARDIS
+    
+    dat_dir         = '/home/stojanovic/SOURCEDATA/Source_parc_data/';
+    addpath(dat_dir);
+
+    ff = filesep;
+    file_prefix     = 'CompVar_source_parc_trls_';
+    MODIN   = fullfile(dat_dir,'SOURCEDATA/Source_parc_data/');
+    MODOUT  = fullfile(dat_dir,'PSDDATA/');
+
+    backend = 'slurm';
+    compile = 'no';
+    
+    overwrite = 1;
+
+    % specify resource allocation on TARDIS
+    stack = 1;
+    timreq = 240;       % in minutes per run
+    memreq = 20*1024^3; % 50 GB
+
+    %check if dir exists and, if not, create it
+    checkdir = exist(MODOUT); % returns 7 if dir is an existing folder
+                              % only set up directory if it isn't already one
+    if checkdir ~= 7
+        mkdir(MODOUT) % set up dir if 7 is not returned
+    end
+end 
+
+ff = filesep; % based on the operating system (different for Mac v Windows)
+
+disp('Done listing subs and initializing directory');
+
+%% Make configurations (cfg) list
+% initialise configurations per subject
+
+cfg         = [];
+cfglist     = {};
+
+for isub = 1:length(sub_list)
+    
+    cfg.MODIN   = MODIN;  % input
+    cfg.MODOUT  = MODOUT; % output
+    cfg.subjno   = sub_list(isub); % subject number
+    cfg.outfile = [MODOUT ff sub_list{isub} 'PSD.mat']; % output
+    ff = filesep; % file seperator (different for Mac or Windows)
+    
+    subjno    = cfg.subjno;
+    
+    % think about also saving as separate folders (one folder per subject)
+    parcfolder  = [MODIN 'Source_parc_data'];
+    parcfile    = [parcfolder ff 'CompVar_source_parc_trls' '_' cell2mat(subjno)];
+    
+    cfg.parcfile = parcfile;
+    
+    if ~exist(cfg.outfile, 'file') || overwrite
+        cfglist = [cfglist cfg];
+    end
+end
+
+%% loop across subjects
+disp('Looping across subjects');
+for s = 1:size(sub_list,2)
+    sub = sub_list(s);
+    load([dat_dir file_prefix cell2mat(sub)])             % load file per subject
+    spec = NaN(size(parc_trls.trial,2),64,size(freqs,2)); % preallocate cells for spectra
+ 
+    %% loop across the trials per subject
+    for t = 1:size(parc_trls.trial,2)
+       
+            % try sandwiching of data here
+            % the dimensionality of parc_trls.trial is 'rpt_chan_time'
+            % where chan refers to the atlas parcels and time to time
+            or_dat=(squeeze(parc_trls.trial(t, :, :)))';
+            sand_dat = [flipud(or_dat); or_dat; flipud(or_dat)];
+            [p, f] = pwelch((sand_dat) , [], [],freqs, fs);
+            allps_sand(t,:,:) = p';
+            clear sand_dat
+       
+    end
+
+    save([dat_dir 'PSDs' ff 'CompVar_all_PSDs_sub_' num2str(sub)], 'allps_sand')
+
+    clear allps_sand   parc_trls
+
+end
