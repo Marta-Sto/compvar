@@ -2,8 +2,7 @@ function [allps_sand] = get_pwelch()
 % GET_PWELCH Run the pwelch function across subjects.
 
 %% list subjects
-% sub_list    = {'100307'; '102816'; '105923'; '106521'; '108323'; '109123'; '112920'; '113922'};
-sub_list = {'100307'};
+sub_list    = {'100307'; '102816'; '105923'; '106521'; '108323'; '109123'; '112920'; '113922'};
 
 %% initalize subject list and data directory
 
@@ -11,12 +10,12 @@ sub_list = {'100307'};
 
 if ismac
     
-    dat_dir         = '/Users/stojanovic/Documents/Projects/MaxPlanck/Data/';
-    addpath(dat_dir);
+    basepath        = '/Users/stojanovic/Documents/Projects/MaxPlanck/Data/';
+    addpath(basepath);
     file_prefix     = 'CompVar_source_parc_trls_'; % might not need to be specified here
     % file_prefix = 'CompVar_PSD_spec_';
-    MODIN   = fullfile(dat_dir);
-    MODOUT  = fullfile(dat_dir);
+    MODIN   = fullfile(basepath);
+    MODOUT  = fullfile(basepath);
     
     ff = filesep;
     backend = 'local';
@@ -24,13 +23,12 @@ if ismac
 
 else % TARDIS
     
-    dat_dir         = '/home/stojanovic/SOURCEDATA/Source_parc_data/';
-    addpath(dat_dir);
-
+    basepath        = '/home/mpib/stojanovic/'; addpath(basepath);
+    
     ff = filesep;
     file_prefix     = 'CompVar_source_parc_trls_';
-    MODIN   = fullfile(dat_dir,'SOURCEDATA/Source_parc_data/');
-    MODOUT  = fullfile(dat_dir,'PSDDATA/');
+    MODIN   = fullfile(basepath,'SOURCEDATA/Source_parc_data/');
+    MODOUT  = fullfile(basepath,'PSDDATA/');
 
     backend = 'slurm';
     compile = 'no';
@@ -42,7 +40,7 @@ else % TARDIS
     timreq = 240;       % in minutes per run
     memreq = 20*1024^3; % 50 GB
 
-    % check if dir exists and, if not, create it
+    %check if dir exists and, if not, create it
     checkdir = exist(MODOUT); % returns 7 if dir is an existing folder
                               % only set up directory if it isn't already one
     if checkdir ~= 7
@@ -92,7 +90,7 @@ disp('Done initializing frequencies and sampling rate');
 disp('Looping across subjects');
 for s = 1:size(sub_list,2)
     sub        = sub_list(s);
-    load([dat_dir file_prefix cell2mat(sub)])                    % load file per subject
+    load([MODIN file_prefix cell2mat(sub)])                   % load file per subject
     allps_sand = NaN(size(parc_trls.trial,2),245,size(freqs,2)); % preallocate cells for spectra
  
     %% loop across the trials per subject
@@ -105,7 +103,7 @@ for s = 1:size(sub_list,2)
             [p, f]   = pwelch((sand_dat) , [], [], freqs, fs);
             % allps_sand(:, t, :) = p';
             allps_sand = p'; % consider why I'm transposing here
-            save([dat_dir ff 'CompVar_PSDs_sub_' cell2mat(sub)], 'sand_dat')
+            save([MODOUT ff 'CompVar_PSDs_sub_' cell2mat(sub)], 'sand_dat')
             clear sand_dat
        
     end
@@ -113,8 +111,8 @@ for s = 1:size(sub_list,2)
     disp('PWelch function ran over the squeezed trial dimension');
     
     % save data into appropriate data directory
-    save([dat_dir ff 'CompVar_fs_sub_' cell2mat(sub)], 'f')
-    save([dat_dir ff 'CompVar_allpsds_sub_' cell2mat(sub)], 'allps_sand')
+    save([MODOUT ff 'CompVar_fs_sub_' cell2mat(sub)], 'f')
+    save([MODOUT ff 'CompVar_allpsds_sub_' cell2mat(sub)], 'allps_sand')
 
     clear allps_sand   parc_trls og_dat
     
