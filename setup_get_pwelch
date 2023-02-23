@@ -1,0 +1,124 @@
+function setup_get_pwelch()
+% SETUP_GET_PWELCH Function to set up function that runs pwelch across
+% participants on the remote server.
+
+clc
+clear all
+
+%% list subjects
+sub_list    = {'100307'; '102816'; '105923'; '106521'; '108323'; '109123'; '112920'; '113922'};
+
+%% initalize subject list and data directory
+
+% create loop for Mac (local) versus TARDIS (remote server)
+if ismac
+    
+    basepath        = '/Users/stojanovic/Documents/Projects/MaxPlanck/Data/';
+    addpath(basepath);
+    %file_prefix     = 'CompVar_source_parc_trls_'; % might not need to be specified here
+    % file_prefix = 'CompVar_PSD_spec_';
+    MODIN   = fullfile(basepath);
+    MODOUT  = fullfile(basepath);
+    
+    backend = 'local';
+    compile = 'no';
+
+else % TARDIS
+    
+    basepath        = '/home/mpib/stojanovic/'; addpath(basepath);
+    % add relevant paths
+    addpath(basepath, 'fieldtrip-20220104/qsub/'); % fieldtrip
+    addpath(genpath('/home/mpib/stojanovic/fieldtrip-20220104/qsub/'));
+    addpath(genpath('/home/mpib/stojanovic/megconnectome-master/'));
+    
+    %file_prefix     = 'CompVar_source_parc_trls_';
+    
+    MODIN   = fullfile(basepath,'SOURCEDATA/Source_parc_data/');
+    MODOUT  = fullfile(basepath,'PSDDATA/');
+
+    backend = 'slurm';
+    compile = 'no';
+    
+    overwrite = 1;
+
+    % specify resource allocation on TARDIS
+    stack = 1;
+    timreq = 240;       % in minutes per run
+    memreq = 20*1024^3; % 50 GB
+
+    %check if dir exists and, if not, create it
+    checkdir = exist(MODOUT); % returns 7 if dir is an existing folder
+                              % only set up directory if it isn't already one
+    if checkdir ~= 7
+        mkdir(MODOUT) % set up dir if 7 is not returned
+    end
+end 
+
+ff = filesep; % based on the operating system (different for Mac v Windows)
+
+disp('Done listing subs and initializing directory');
+
+%% Make configurations (cfg) list
+% initialise configurations per subject
+
+cfg         = [];
+cfglist     = {};
+
+for isub = 1:length(sub_list)
+    
+    cfg.MODIN   = MODIN;  % input
+    cfg.MODOUT  = MODOUT; % output
+    cfg.subjno   = sub_list(isub); % subject number
+    cfg.outfile = [MODOUT ff sub_list{isub} 'PSD.mat']; % output
+    ff = filesep; % file seperator (different for Mac or Windows)
+    
+    subjno    = cfg.subjno;
+    
+    % think about also saving as separate folders (one folder per subject)
+    parcfolder  = [MODIN 'Source_parc_data'];
+    parcfile    = [parcfolder ff 'CompVar_source_parc_trls' '_' cell2mat(subjno)];
+    
+    cfg.parcfile = parcfile;
+    
+    if ~exist(cfg.outfile, 'file') || overwrite
+        cfglist = [cfglist cfg];
+    end
+end
+
+%% Shuffle configurations and check
+% shuffle list of configurations to run
+cfglist = cfglist(randsample(length(cfglist),length(cfglist)));
+
+% print out the number of data files
+fprintf('Pwelch run for %d subject(s)\n', length(cfglist))
+
+if strcmp(backend, 'slurm')
+    options = '-D. -c5'; % --gres=gpu:1 % c refers to number of CPUs requested
+else
+    options =  '-l nodes=1:ppn=3';
+end
+
+% check the directory
+mkdir('~/qsub'); cd('~/qsub');
+
+%% Run source estimation on parcellated data
+% compile the function to be executed in a batch on the server
+% run function has to live in the same folder as the setup to work
+if strcmp(compile, 'yes')
+    fun2run = qsubcompile({@get_pwelch}, 'toolbox', {'signal', 'stats'}); 
+else
+    fun2run = @get_pwelch;    % fun2run takes all prior inputs and returns 
+                              % the parcellated source estimation per subject                                   
+end 
+
+if strcmp(backend, 'local')
+    cellfun(fun2run, cfglist)
+    return
+end
+% run the function with 
+% prepare job list, where qsubcellfun applies the source script to each element of a cell array
+qsubcellfun(fun2run, cfglist, 'memreq', memreq, 'timreq', timreq*60, 'stack', stack, ...
+    'StopOnError', true, 'backend', backend, 'options', options);
+
+
+end
