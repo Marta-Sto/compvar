@@ -1,0 +1,236 @@
+function source_run_ten_sec()
+%% add relevant paths and define information
+clc
+clear
+
+basepath = '/home/mpib/stojanovic/';
+% fieldtrip_dir = '/home/mpib/stojanovic/fieldtrip-20220104/';
+fieldtrip_dir = '/Volumes/LNDG/Projects/HCP/Sourceproject/fieldtrip-20220104/';
+addpath(fieldtrip_dir);
+
+ft_defaults();
+
+% datdir = '/home/mpib/stojanovic/SOURCEDATA/';
+% addpath(datdir);
+
+addpath(genpath('/Volumes/LNDG/Projects/HCP/megconnectome-master/'));
+
+%% create modout directory
+MODOUT = '/home/mpib/stojanovic/SOURCEDATA/';
+
+%check if dir exists, if not, create it
+checkdir = exist(MODOUT); % returns 7 if dir is an existing folder
+                          % only set up directory if it isn't already one
+if checkdir ~= 7
+    mkdir(MODOUT) % set up dir if 7 is not returned
+end
+
+%% subject
+sub = {'100307'};
+
+isub = 1;
+%% define info per subject
+% for isub = 1:length(sub)
+    
+    ff = filesep; % file seperator (different for Mac or Windows)
+    
+    % subject data
+    MODIN = '/Volumes/LNDG/Projects/HCP/Sourceproject/MEG/';
+    
+    subfolder  = [MODIN sub{isub} ff 'Restin' ff 'rmegpreproc'];
+    restfile   = [subfolder ff [sub{isub} '_' 'MEG_3-Restin_rmegpreproc.mat']];
+    anatfolder = [MODIN sub{isub} ff 'anatomy']; % anatomy
+    anatfile   = [anatfolder ff [sub{isub} '_' 'MEG_anatomy_transform.txt']];
+    headfile   = [anatfolder ff [sub{isub} '_' 'MEG_anatomy_headmodel.mat']]; % head model
+    smodfile   = [anatfolder ff [sub{isub} '_' 'MEG_anatomy_sourcemodel_3d8mm.mat']]; % source model
+    fmrifile   = ([MODIN sub{isub} ff 'a*/T1w*']);
+
+ff = filesep; % based on the operating system (different for Mac v Windows)
+
+% end
+
+%% load relevant data per subject
+load(restfile);
+
+% transformation matrix per subject
+tmat = hcp_read_ascii(anatfile); 
+T = tmat.transform.bti2spm;
+
+% head model 
+tmp = load(headfile);
+hm = tmp.headmodel;
+hm = ft_convert_units(hm, 'mm');
+
+% source model
+tmp = load(smodfile);
+sm = tmp.sourcemodel3d;
+sm = ft_convert_units(sm, 'mm');
+disp('Headmodel and sourcemodel ready');
+
+%% define trials with 10-second length 
+% % try different way of defining or redefining trial
+% clear ten_seconds;
+% cfg = [];
+% cfg.dataset = restfile;     % warning: sampleinfo in the configuration 
+%                             % is inconsistent with the actual data 
+%                             % due to the removal of non-MEG channels
+% cfg.trialdef.beginning = 0; % start at the beginning of the recording
+% cfg.trialdef.length    = 10;
+% cfg.trialdef.overlap   = 0; % no overlap between trials
+% ten_seconds = ft_definetrial(cfg);
+% disp('Done obtaining trl to redefine trials');
+
+%% redefine trials to 10 seconds
+% clear redef_data;
+% cfg = [];
+% cfg.trl = ten_seconds.trl; % use trl from defined trial
+% redef_data = ft_redefinetrial(cfg,data);
+% disp('Done redefining trial length');
+% % redef_data.trialinfo = redef_data.sampleinfo; 
+
+%% resize data
+clear long_trl_dum;
+long_trl_dum = data;
+long_trl_dum.trial = {horzcat(data.trial{:})};
+long_trl_dum.time = {[0:(1/data.fsample):((1/data.fsample)*size(long_trl_dum.trial{1},2)-(1/data.fsample))]};
+long_trl_dum = rmfield(long_trl_dum, 'trialinfo');
+ 
+%% redefine trial length
+clear ten_sec_trl;
+cfg = [];
+cfg.length = 10;
+redef_data = ft_redefinetrial(cfg, long_trl_dum);
+disp('Done redefining trial length');
+
+%% preprocess redefined 10-second trials
+clear ten_sec_trls;
+cfg = [];
+cfg.demean = 'yes';
+cfg.baselinewindow = 'all';
+% cfg.baselinewindow = [0 2]; % prints warning that the baseline is too
+%                             % short
+ten_sec_trls = ft_preprocessing(cfg,redef_data);
+disp('Done preprocessing and baseline correcting longer trials');
+
+%% check whether there are NaNs or ifs in the data
+% check for NaNs in all structs pertaining to the new 10-second trial length
+for i = 1:numel(ten_sec_trls.trial)
+    for j = 1:numel(ten_sec_trls.label)
+        if any(isnan(ten_sec_trls.trial{i}(j,:)))
+            fprintf('NaNs detected in trial %d, channel %s\n', i, ten_sec_trls.label{j});
+            % else fprintf('No NaNs detected');
+        end
+    end
+end
+
+%% get covariance of 10-second trials
+clear tlck_ten_sec;
+% implement isNaN in a loop to check for NaN values in struct
+% another warning based on inconsistent sampleinfo
+cfg = [];
+% cfg.preproc.demean         = 'yes';
+% cfg.preproc.baselinewindow = 'all';
+cfg.covariance  = 'yes';
+tlck_ten_sec = ft_timelockanalysis(cfg,ten_sec_trls);
+disp('Done timelocking 10-second trials');
+
+%% get covariance across all 10-second trials
+clear tlck_ten_all;
+cfg = [];
+% cfg.preproc.demean         = 'yes';
+% cfg.preproc.baselinewindow = 'all';
+cfg.keeptrials  = 'yes';
+cfg.vartrllength = 0;
+cfg.covariance  = 'yes';
+tlck_ten_all    = ft_timelockanalysis(cfg,ten_sec_trls);
+disp('Done timelocking all 10-second trials');
+
+%% check whether there are NaNs or ifs in the data
+% check for NaNs in all structs pertaining to the new 10-second trial length
+res = size(tlck_ten_all.trial);
+for i = 1:res(1)
+    for j = 1:res(2)
+        for k = 1:res(3)
+            if any(isnan(tlck_ten_all.trial(i,j,k)))
+                fprintf('NaNs detected in trial');
+            end
+        end
+    end
+end
+
+%% also transform headmodel
+clear hm_trans;
+hm_trans = ft_transform_geometry(T,hm);
+disp('Done transforming head model');
+
+%% get reg kappa and run beamformer (LCMV)
+clear kappa;
+[u,s,v] = svd(((tlck_ten_sec.cov)));
+d       = -diff(log10(diag(s)));
+d       = d./std(d);
+kappa   = find(d>5,1,'first');
+
+%% generate leadfield
+clear lf_ten_meg;
+clear lf_ten_meg_trans;
+cfg             = [];
+cfg.channel     = tlck_ten_sec.label;
+cfg.grad        = tlck_ten_sec.grad;
+cfg.normalizeparam = 1;
+cfg.sourcemodel = sm;
+cfg.headmodel   = hm;
+cfg.reducerank  = 2;
+cfg.normalize   = 'yes';
+lf_ten_meg       = ft_prepare_leadfield(cfg);
+lf_ten_meg_trans = ft_transform_geometry(T,lf_ten_meg);
+disp('Done creating leadfield');
+
+%% run source analysis on longer trials
+clear source_avg_ten;
+cfg                 = [];
+cfg.lcmv.lambda     = '5%';
+cfg.lcmv.kappa      = kappa;
+cfg.method          = 'lcmv';
+cfg.lcmv.keepfilter = 'yes';
+cfg.lcmv.fixedori   = 'yes';
+cfg                 = [];
+cfg.lcmv.lambda     = '5%';
+cfg.lcmv.kappa      = kappa;
+cfg.method          = 'lcmv';
+cfg.lcmv.keepfilter = 'yes';
+cfg.lcmv.fixedori   = 'yes';
+cfg.lcmv.weightnorm = 'unitnoisegain';
+cfg.headmodel   = hm_trans; % here using transformed versions,
+                            % could also use non-transformed -
+                            % visualise to check 
+cfg.sourcemodel = lf_ten_meg_trans;
+source_avg_ten  = ft_sourceanalysis(cfg,tlck_ten_all);
+disp('Done averaging source data');
+
+%% read atlas
+clear brainnetome;
+brainnetome = ft_read_atlas([fieldtrip_dir '/template/atlas/brainnetome/BNA_MPM_thr25_1.25mm.nii']);
+disp('Atlas read');
+
+%% interpolate source average onto atlas
+clear atlas_lowres;
+cfg = [];
+cfg.parameter = 'all';
+cfg.interpmethod = 'nearest';
+atlas_lowres = ft_sourceinterpolate(cfg,brainnetome,source_avg_ten);
+
+% align positions of the atlas and the source average
+atlas_lowres.pos = source_avg_ten.pos;
+disp('Done interpolating source data onto the atlas');
+
+%% parcellate single trials
+% parcellate trials based on 10-second snippets
+clear parc_trls;
+cfg = [];
+cfg.method  = 'svd'; % can be either svd or pca
+% cfg.pos   = 'pos';
+cfg.parcellation = 'tissue';
+parc_trls = ft_virtualchannel(cfg,tlck_ten_all,source_avg_ten,atlas_lowres);
+disp('Done parcellating single trial data');
+
+end
