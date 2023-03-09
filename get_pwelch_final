@@ -1,0 +1,66 @@
+function [allps_sand] = get_pwelch(cfg)
+% GET_PWELCH Run pwelch function for power spectral density estimates
+% across subjects.
+
+clc
+
+%% define paths
+basepath = '/home/mpib/stojanovic/';
+addpath(basepath);
+addpath(basepath, 'fieldtrip-20220104/');
+
+MODIN = '/home/mpib/stojanovic/SOURCEDATA/';
+addpath(MODIN);
+addpath(genpath('/home/mpib/stojanovic/megconnectome-master/'));
+
+MODOUT = '/home/mpib/stojanovic/PSDDATA/';
+addpath(MODOUT);
+
+%% define subject list
+sub_list    = {'100307'; '102816'; '105923'; '106521'; '108323'; '109123'; 
+               '112920'; '113922'};
+
+%% pass configuration list
+MODIN  = cfg.MODIN;
+MODOUT = cfg.MODOUT;
+subjno = cfg.subjno;
+
+disp(cfg.MODIN);
+cd(cfg.MODOUT);
+
+%% initialize frequencies and the sampling rate
+freqs = 1:.5:100; % frequencies from 1 to 100 in steps of 0.5
+                  % can also play with the step size here to change the
+                  % peak window for FOOOF analyses
+fs    = 500;
+disp('Done initializing frequencies and sampling rate'); 
+
+%% loop across subjects
+disp('Looping across subjects');
+for s = 1:size(sub_list)
+    sub             = sub_list(s);
+    file_prefix     = 'CompVar_source_parc_trls_';
+    load([MODIN file_prefix cell2mat(sub)]) % load file per subject
+    allps_sand = NaN(size(parc_trls.trial,1),size(parc_trls.trial,2),size(freqs,1)); % preallocate cells for spectra
+ 
+    %% loop across the trials per subject
+    for t = 1:size(parc_trls.trial,1) % for the size of the trial dimension
+            og_dat   = (squeeze(parc_trls.trial(t,:,:)))'; % transpose
+            sand_dat = [flipud(og_dat); og_dat; flipud(og_dat)]; % sandwich the data
+            [p, f]   = pwelch((sand_dat) , [], [], freqs, fs);
+            allps_sand(t, :, :) = p';
+            disp(cfg.MODIN);
+            clear sand_dat
+    end
+    %% save pwelch data
+    disp('PWelch function ran over the trial dimension');
+    ff = filesep; % file separator different for Mac versus Windows
+
+    % save data into appropriate data directory
+    save([MODOUT ff 'CompVar_allpsds_' cell2mat(sub)], 'allps_sand');
+    save([MODOUT ff 'CompVar_fs_' cell2mat(sub)], 'f'])
+
+    clear allps_sand   parc_trls   og_dat
+    
+    
+end
