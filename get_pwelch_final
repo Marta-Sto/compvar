@@ -17,8 +17,10 @@ MODOUT = '/home/mpib/stojanovic/PSDDATA/';
 addpath(MODOUT);
 
 %% define subject list
-sub_list    = {'100307'; '102816'; '105923'; '106521'; '108323'; '109123'; 
-               '112920'; '113922'};
+% sub_list    = {'100307'; '102816'; '105923'; '106521'; '108323'; '109123'; 
+               %'112920'; '113922'};
+               
+sub_list = {'100307'; '102816'};
 
 %% pass configuration list
 MODIN  = cfg.MODIN;
@@ -38,18 +40,19 @@ disp('Done initializing frequencies and sampling rate');
 %% loop across subjects
 disp('Looping across subjects');
 for s = 1:size(sub_list)
+    ff = filesep;
     sub             = sub_list(s);
-    file_prefix     = 'CompVar_source_parc_trls_';
-    load([MODIN file_prefix cell2mat(sub)]) % load file per subject
-    allps_sand = NaN(size(parc_trls.trial,1),size(parc_trls.trial,2),size(freqs,1)); % preallocate cells for spectra
+    file_prefix     = 'CompVar_parc_trls_';
+    load([MODIN ff 'Parcellated_source_data' ff file_prefix cell2mat(sub)]); % load file per subject
+    allps_sand = NaN(size(parc_trls.trial,1),size(parc_trls.trial,2),size(freqs,2)); % preallocate cells for spectra
  
     %% loop across the trials per subject
     for t = 1:size(parc_trls.trial,1) % for the size of the trial dimension
-            og_dat   = (squeeze(parc_trls.trial(t,:,:)))'; % transpose
+            og_dat   = (squeeze(parc_trls.trial(t,:,:)))';       % transpose
             sand_dat = [flipud(og_dat); og_dat; flipud(og_dat)]; % sandwich the data
             [p, f]   = pwelch((sand_dat) , [], [], freqs, fs);
-            allps_sand(t, :, :) = p';
-            disp(cfg.MODIN);
+            allps_sand(t,:,:) = p';
+            %disp(cfg.MODIN);
             clear sand_dat
     end
     %% save pwelch data
@@ -57,8 +60,8 @@ for s = 1:size(sub_list)
     ff = filesep; % file separator different for Mac versus Windows
 
     % save data into appropriate data directory
-    save([MODOUT ff 'CompVar_allpsds_' cell2mat(sub)], 'allps_sand');
-    save([MODOUT ff 'CompVar_fs_' cell2mat(sub)], 'f'])
+    save([MODOUT ff 'CompVar_psds_' cell2mat(sub)], 'allps_sand');
+    save([MODOUT ff 'CompVar_f_' cell2mat(sub)], 'f');
 
     clear allps_sand   parc_trls   og_dat
     
