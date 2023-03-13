@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Feb 21 23:35:58 2023
+
+Script that runs FOOOF analysis across subjects. Loads PSD estimates
+and associated frequencies per subject from the output of pwelch.
+
+@author: stojanovic
+
+"""
+
+# Import packages
+import numpy as np
+import scipy.io as spio
+from fooof import FOOOFGroup
+
+# List subjects
+#subjects   = ['100307','102816','105923','106521','108323','109123','112920','113922']
+subjects = ['108323']
+
+sub_dir  = '/Users/stojanovic/Documents/Projects/MaxPlanck/Data/100307/'
+
+
+# Create a FOOOFGroup object to fit power spectra across all subjects
+fg = FOOOFGroup(peak_width_limits = [3,7], min_peak_height = 0.05, max_n_peaks = 8)
+
+
+for s in range(0, np.size(subjects)):
+    
+    sub = subjects[s]
+    
+    # Define directory for input subject data
+    #sub_dir = '/home/mpib/stojanovic/PSDDATA/PSD_data/'
+    
+    # Data directory for local machine
+    sub_dir  = '/Users/stojanovic/Documents/Projects/MaxPlanck/Data/100307/'
+
+    # Define directory to save the FOOOF results
+    #out_dir = '/home/mpib/stojanovic/PSDDATA/Fooof_results/'
+    
+    psd_file   = sub_dir + 'CompVar_psds_' + str(sub) + '.mat'
+    freqs_file = sub_dir + 'CompVar_f_' + str(sub) + '.mat'
+
+    psds  = spio.loadmat(psd_file,  mdict = None, mat_dtype = True, struct_as_record = False)
+    freqs = spio.loadmat(freqs_file,mdict = None, mat_dtype = True, struct_as_record = False)
+    
+    psds  = psds['allps_sand']
+    freqs = freqs['f']
+    
+    # Define the frequency range
+    freq_range = [2,40] 
+    
+    # Initialize arrays
+    exps_array      = np.empty((199,np.size(psds,0)))
+    print('Shape of exponent array:', exps_array.shape)
+    offset_array    = np.empty((199,np.size(psds,0)))
+    print('Shape of offset array:', offset_array.shape)
+    r_squared_array = np.empty((199,np.size(psds,0)))
+    print('Shape of r-squared array:', r_squared_array.shape)
+    osc_peaks_array = np.empty((199,np.size(psds,0)))
+
+                               
+    osc_peaks_list  = list()
+
+    for t in range(1,np.size(psds,0)): # loop over the trial dimension
+        
+        trl_dat = np.asarray(np.squeeze(psds[:,t,:]),dtype=object) # remaining dimensions are parcel x freq
+                                                                  
+        # Loaded data may contain extra dimensions which may need to be flattened
+        freqs = np.asarray(np.squeeze(freqs))
+        
+        print('Shape of psds array:', psds.shape)
+        print('Shape of freqs array:', freqs.shape)
+                
+        if np.isnan(trl_dat[1,1]):
+            freqs = np.linspace(1,199, num = np.size(psds,1))
+            exps_array[t,:] = np.NaN
+            offset_array[t,:] = np.NaN
+            peak_nan = np.empty((8,1))
+            peak_nan[:] = np.NaN     
+            print('Size of peak nan array:', peak_nan.shape)
+            osc_peaks = list(peak_nan)
+            osc_peaks_list.append(osc_peaks)
+            r_squared_array[:,t] = np.NaN
+        
+        else:
+            freqs = np.linspace(1,199, num = np.size(trl_dat,1))
+            #psds   = np.asarray(psds,dtype=float)
+            print('Size of psds array:', trl_dat.shape)
+            print('Size of freqs array:', freqs.shape)
+            
+            fg1 = fg.fit(freqs, trl_dat, freq_range, n_jobs=1)
+
+            exps_temp = fg.get_params('aperiodic_params','exponent')
+            exps_array[t,:] = exps_temp
+            print('Shape of exps array:', offset_array.shape)
+            
+            offset_temp = fg.get_params('aperiodic_params','offset')
+            print('Shape of offset_temp:',offset_temp.shape)
+            offset_array[t,:] = offset_temp # defined for individual model fits
+            print('Shape of offset array:', offset_array.shape)
+            
+            # peaks_temp = list(fg.get_params('peak_params',['CF','PW','BW']))
+            peaks_temp = fg.get_params('peak_params','CF')
+            osc_peaks = peaks_temp
+            osc_peaks_list.append(osc_peaks)
+         
+            #osc_peaks_array = np.array(osc_peaks_list, dtype=object,axis=1)
+            #print('Shape of peak params:', peaks_temp.shape)
+        
+            r_squ_temp =fg.get_params('r_squared')
+            r_squared_array[t,:] = r_squ_temp
+            print('Shape of r squared array:', r_squared_array.shape)
+            
+              
+    # Save data per subject
+    all_dat                 = {}
+    all_dat['slopes']       = exps_array
+   # all_dat['oscillations'] = peaks_temp
+    all_dat['offset']       = offset_array
+    all_dat['rsquared']     = r_squared_array
+    
+    # save data into the appropriate directory
+    savname = sub_dir + 'CompVar_fooof_results_sub_' + str(sub) + '.mat'
+    
+    #savname = out_dir + 'CompVar_fooof_results_sub_' + str(sub) + '.mat'
+    print('Done running and saving FOOOF over spectra')
+    
+    spio.savemat(savname, all_dat)
+    
+    del all_dat 
