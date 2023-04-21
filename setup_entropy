@@ -114,7 +114,6 @@ fprintf('Computing for %d subject\n', isub);
 end
 
 %% Shuffle configurations and check
-% shuffle list of configurations to run
 cfglist = cfglist(randsample(length(cfglist),length(cfglist)));
 
 % print out the number of data files
@@ -123,9 +122,7 @@ fprintf('Computing for %d subject(s)\n', length(cfglist))
 % check the directory
 mkdir('~/qsub'); cd('~/qsub');
 
-%% Run source estimation on parcellated data
-% compile the function to be executed in a batch on the server
-% run function has to live in the same folder as the setup to work
+%% Run entropy analyses on source estimated data
 if strcmp(backend, 'slurm')
 fun2run = qsubcompile({@run_entropy}, 'toolbox', {'signal', 'stats'}); 
 else
