@@ -1,0 +1,117 @@
+function run_entropy(cfg)
+%RUN_ENTROPY Function that runs entropy estimates across subjects.
+
+clc
+%% set up and add relevant paths
+
+basepath = '/Volumes/LNDG/Projects/HCP/Sourceproject/';
+addpath(basepath);
+
+RESTIN  = fullfile(basepath, 'MEG/');
+MODIN   = fullfile(basepath, 'SOURCEDATA/'); 
+MODOUT  = fullfile(basepath, 'ENTROPYDATA/');
+
+%% List HCP subjects
+
+sub = {'100307'; '102816'; '105923'; '106521'; '108323'; '109123'; '112920'; '113922'};
+
+%% Make configurations (cfg) list
+
+cfg         = [];
+cfglist     = {};
+
+for isub = 1:length(sub)
+
+cfg.RESTIN  = RESTIN;
+cfg.MODIN   = MODIN;
+cfg.MODOUT  = MODOUT;
+cfg.subjno  = sub(isub);
+
+ff = filesep; % file seperator (different for Mac or Windows)
+cfg.outfile = [MODOUT ff sub{isub} 'mmse_estimate.mat']; % output
+
+subjno      = cfg.subjno;
+subfolder   = [RESTIN sub{isub} ff 'Restin' ff 'rmegpreproc'];
+restfile    = [subfolder ff [sub{isub} '_' 'MEG_3-Restin_rmegpreproc.mat']];
+parcfolder  = [MODIN 'Parcellated_source_data'];
+parcfile    = [parcfolder ff 'CompVar_parc_trls' '_' cell2mat(subjno)];
+
+cfg.parcfile = parcfile;
+cfg.restfile = restfile;
+
+if ~exist(cfg.outfile, 'file') || overwrite
+    cfglist = [cfglist cfg];
+end
+fprintf('Computing for %d subject\n', isub);
+
+end
+
+%% Shuffle configurations and check
+
+% shuffle list of configurations to run
+cfglist = cfglist(randsample(length(cfglist),length(cfglist)));
+
+% print out the number of data files
+fprintf('Computing for %d subject(s)\n', length(cfglist))
+
+% check the directory
+mkdir('~/qsub'); cd('~/qsub');
+
+
+%% load relevant data per subject
+restfile = '/Volumes/LNDG/Projects/HCP/Sourceproject/MEG/113922/Restin/rmegpreproc/113922_MEG_3-Restin_rmegpreproc.mat';
+clear data; clear parc_trls;
+load(restfile);
+load(parcfile);
+
+%% reshape parcellated trials data struct
+
+% create raw data struct from timelock struct
+% (the timelock struct is parcellated trial data)
+clear dummy_entropy; 
+dummy_entropy = parc_trls;
+dummy_entropy.trial = [];
+for itrial =1:size(parc_trls.trial,1)
+    dummy_entropy.trial{itrial} = squeeze(parc_trls.trial(itrial,:,:));
+end
+dummy_entropy.label = parc_trls.label;
+dummy_entropy.time  = data.time; % important for the struct
+                                 % to be recognised as raw
+dummy_entropy       = rmfield(dummy_entropy,'brainordinate');
+dummy_entropy.cfg   = data.cfg;
+disp('Done initially reshaping struct');
+
+%% reshape timelock struct into raw datatype
+% raw datatype only requires trial, time, and label fields
+% all other fields are optional
+
+clear test_entropy;
+test_entropy.trial = dummy_entropy.trial;
+test_entropy.time  = dummy_entropy.time;
+test_entropy.label = dummy_entropy.label;
+
+%% reshape the data to create a new trial field
+% reshape the trial dimension in the struct
+reshaped_cell = mat2cell(reshaped_trial, 246, repmat(1018, [1 145]));
+reshaped_trial = reshape(parc_trls.trial, [246, 145*1018]);
+reshaped_cell = mat2cell(reshaped_trial, 246, repmat(1018, [1 145]));
+test_entropy.trial = reshaped_cell;
+
+%% run entropy analysis on reshaped struct
+% run ft_entropyanalysis function for entropy estimates
+cfg     = [];
+cfg.toi = 1; % center analysis arounf this timepoint
+cfg.timescales = 1:2; % timescale (1=fastest dynamics, ...)
+cfg.timwin     = [2]; % consider all samples within a x second window centered on toi
+cfg.coarsegrainmethod = 'pointavg';
+cfg.filtmethod = 'lp';
+cfg.m          = 2;
+cfg.r          = 0.5;
+cfg.channel    = 'all';
+cfg.polyremoval  = 0;
+cfg.mem_availabl = 8e9;
+cfg.recompute_r  = 'per_toi';
+cfg.allowgpu     = 1;
+mmse = ft_entropyanalysis(cfg,test_entropy);
+
+end
