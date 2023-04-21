@@ -1,0 +1,145 @@
+function setup_entropy()
+%SETUP_ENTROPY_ANAL Function to set up configurations for running entropy
+%                   analyses across subjects.
+
+%% set up configurations
+
+if ismac % local machine
+
+    % set fieldtrip path
+    fieldtrip_dir = '/Users/stojanovic/Documents/Projects/MaxPlanck/Toolboxes/fieldtrip-20220104/'; % Marta's local path
+    % fieldtrip_dir   = '/Volumes/FB-LIP/LNDG/Projects/HCP/Sourceproject/fieldtrip-20220104/'; % path on server
+    addpath(fieldtrip_dir)
+
+    % set up mmse path
+    mmse_path = '/Users/stojanovic/Documents/Projects/MaxPlanck/Toolboxes/mMSE';
+    addpath(mmse_path);
+    addpath(genpath('/Users/stojanovic/Documents/Projects/MaxPlanck/Toolboxes/mMSE')); 
+
+    % run fieldtrip defaults
+    ft_defaults()
+
+    % add megconnectome functions
+    addpath(genpath('/Volumes/LNDG/Projects/HCP/Sourceproject/MEG/megconnectome-master/'));
+    basepath = '/Volumes/LNDG/Projects/HCP/Sourceproject/';
+    addpath(basepath); 
+
+    RESTIN  = fullfile(basepath, 'MEG/');
+    MODIN   = fullfile(basepath, 'SOURCEDATA/'); 
+    MODOUT  = fullfile(basepath, 'ENTROPYDATA/');
+
+else % TARDIS 
+
+    % set basepath
+    basepath = '/home/mpib/stojanovic/';
+
+    % add relevant paths
+    fieldtrip_dir = '/home/mpib/stojanovic/fieldtrip-20220104/';
+    addpath(fieldtrip_dir);
+
+    addpath(basepath, 'qsub_tardis_slurmpreview/');
+
+    % add mmse path
+    mmse_path = '/home/mpib/stojanovic/mMSE/';
+    addpath(mmse_path);
+
+    % megconnectome functions
+    addpath(genpath('/home/mpib/stojanovic/megconnectome-master/'));
+
+    % call fieldtrip defaults
+    ft_defaults()
+
+    % basic paths for MEG
+    RESTIN  = fullfile(basepath, 'MEG/');
+    MODIN   = fullfile(basepath, 'SOURCEDATA/');
+    MODOUT  = fullfile(basepath, 'ENTROPYDATA/');
+
+    backend = 'slurm';
+    compile = 'no';
+    overwrite = 1;
+
+if strcmp(backend, 'slurm')
+   options = '-D. -c5'; % --gres=gpu:1 % c refers to number of CPUs requested
+else
+   options =  '-l nodes=1:ppn=3';
+end
+
+% specify resource allocation on TARDIS
+stack = 1;
+timreq = 240; % in minutes per run
+memreq = 50*1024^3; % 50 GB
+
+%check if dir exists, if not, create it
+checkdir = exist(MODOUT); % returns 7 if dir is an existing folder
+
+if checkdir ~= 7
+    mkdir(MODOUT) % set up directory only if it doesn't already exist
+end
+
+end
+
+%% List HCP subjects
+
+sub = {'100307'; '102816'; '105923'; '106521'; '108323'; '109123'; '112920'; '113922'};
+
+%% Make configurations (cfg) list
+
+cfg         = [];
+cfglist     = {};
+
+for isub = 1:length(sub)
+
+cfg.RESTIN  = RESTIN;
+cfg.MODIN   = MODIN;
+cfg.MODOUT  = MODOUT;
+cfg.subjno  = sub(isub);
+
+ff = filesep; % file seperator (different for Mac or Windows)
+cfg.outfile = [MODOUT ff sub{isub} 'mmse_estimate.mat']; % output
+
+subjno      = cfg.subjno;
+subfolder   = [RESTIN sub{isub} ff 'Restin' ff 'rmegpreproc'];
+restfile    = [subfolder ff [sub{isub} '_' 'MEG_3-Restin_rmegpreproc.mat']];
+parcfolder  = [MODIN 'Parcellated_source_data'];
+parcfile    = [parcfolder ff 'CompVar_parc_trls' '_' cell2mat(subjno)];
+
+cfg.parcfile = parcfile;
+cfg.restfile = restfile;
+
+if ~exist(cfg.outfile, 'file') || overwrite
+    cfglist = [cfglist cfg];
+end
+fprintf('Computing for %d subject\n', isub);
+
+end
+
+%% Shuffle configurations and check
+% shuffle list of configurations to run
+cfglist = cfglist(randsample(length(cfglist),length(cfglist)));
+
+% print out the number of data files
+fprintf('Computing for %d subject(s)\n', length(cfglist))
+
+% check the directory
+mkdir('~/qsub'); cd('~/qsub');
+
+%% Run source estimation on parcellated data
+% compile the function to be executed in a batch on the server
+% run function has to live in the same folder as the setup to work
+if strcmp(backend, 'slurm')
+fun2run = qsubcompile({@run_entropy}, 'toolbox', {'signal', 'stats'}); 
+else
+fun2run = @run_entropy;    % fun2run takses all prior inputs and returns 
+                           % the parcellated source estimation per subject                                   
+end 
+
+if strcmp(backend, 'local')
+cellfun(fun2run, cfglist)
+return
+end
+
+% prepare job list, where qsubcellfun applies the source script to each element of a cell array
+qsubcellfun(fun2run, cfglist, 'memreq', memreq, 'timreq', timreq*60, 'stack', stack, ...
+'StopOnError', true, 'backend', backend, 'options', options);
+
+end
