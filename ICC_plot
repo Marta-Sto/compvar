@@ -1,0 +1,46 @@
+% Can later turn into a function
+
+% Define the data matrix
+
+% Compute the ICC values using the "icc" function from the Psychometric Toolbox
+icc_values = icc(data, '1-k');
+
+% Define a grid of x, y, and z values
+x = 1:10;
+y = 1:10;
+z = 1:10;
+
+% Initialize an array to hold the ICC values for each point in the grid
+icc_surface = zeros(length(x), length(y), length(z));
+
+% Compute the ICC values for each point in the grid
+for i = 1:length(x)
+    for j = 1:length(y)
+        for k = 1:length(z)
+            % Extract the data value at this point in the grid
+            data_value = data(i, j, k);
+            
+            % Compute the ICC value for this data value using the "icc_values" matrix
+            icc_value = icc_values((data == data_value));
+            
+            % Store the ICC value in the "icc_surface" matrix
+            icc_surface(i, j, k) = icc_value;
+        end
+    end
+end
+
+% Define a custom surface mesh (optional)
+vertices = rand(100,3);
+faces = convhull(vertices);
+
+% Plot the ICC values as a surface using the "ft_sourceplot" function
+cfg = [];
+cfg.method = 'surface';
+cfg.funparameter = 'avg';
+cfg.funcolormap = 'jet';
+cfg.funcolorlim = [0 1];
+cfg.surffile = 'surface.mat'; % use a custom surface mesh if desired
+cfg.projmethod = 'nearest';
+cfg.opacitymap = 'rampdown';
+cfg.opacitylim = [0 1];
+ft_sourceplot(cfg, struct('inside', ones(length(vertices),1)), icc_surface);
