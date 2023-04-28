@@ -1,0 +1,17 @@
+#!/bin/bash
+
+
+subjectlist="MEG_HCP_sub_list.txt"
+
+
+while read subject;
+
+do
+
+    aws s3 cp s3://hcp-openaccess/HCP/$subject/MEG/Restin/rmegpreproc/ /home/mpib/stojanovic/MEG/$subject/ --recursive
+
+    aws s3 cp s3://hcp-openaccess/HCP/$subject/T1w/T1w_acpc_dc_restore_brain.nii.gz /home/mpib/stojanovic/MEG/$subject/ --recursive
+
+    aws s3 cp s3://hcp-openaccess/HCP/$subject/MEG/anatomy/ /home/mpib/stojanovic/MEG/$subject/ --recursive
+
+done<"$subjectlist"
