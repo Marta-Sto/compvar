@@ -18,6 +18,7 @@ if ismac % for Mac
     
     ff = filesep; 
     
+    
     % add Fieldtrip to path
     fieldtrip_dir = '/Users/stojanovic/Documents/Projects/MaxPlanck/Toolboxes/fieldtrip-20220104/'; % on Marta's local Mac
     addpath(fieldtrip_dir);
