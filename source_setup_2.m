@@ -10,7 +10,7 @@ if ismac % for Mac
     
     fprintf('Hello, we are in Mac');
     
-    basepath = '/Volumes/LNDG/Projects/HCP/'; % MEG HCP data
+    basepath = '/Volumes/LNDG/Projects/HCP/';
     backend = 'local';
     compile = 'no';
     
