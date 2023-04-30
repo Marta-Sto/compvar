@@ -1,0 +1,65 @@
+function extract_rsquared()
+%% R^2 script for selecting R^2 above 0.8
+% Script to loop through elements in the R^2 array as an output of FOOOF 
+% analyses conducted in Python.
+clc
+%% Read the R^2 array called the variable rsquared
+% Currently I load the variable into the Matlab workspace and work this way
+
+% add relevant paths
+basepath = '/home/mpib/stojanovic/';
+addpath(basepath);
+addpath(basepath, 'fieldtrip-20220104/');
+addpath(basepath, 'qsub_tardis_slurmpreview/');
+
+% add path for input data
+MODIN = '/home/mpib/stojanovic/PSDDATA/Fooof_results/';
+addpath(MODIN);
+
+ff = filesep;
+
+%% Define subjects
+sub = {
+    '100307'; '102816'; '105923'; '106521'; '108323'; '109123'; '111514'; 
+    '113922'; '116726'; '125525'; '133019'; '140117'; '146129'; '149741'; 
+    '153732'; '156334'; '158136'; '162026'; '166438'; '172029'; '175540'; 
+    '177746'; '181232'; '185442'; '187547'; '189349'; '191033'; '191437'; 
+    '191841'; '192641'; '195041'; '204521'; '205119'; '212318'; '221319'; 
+    '233326'; '250427'; '255639'; '287248'; '293748'; '352132'; '352738'; 
+    '406836'; '433839'; '512835'; '559053'; '568963'; '599671'; '601127'; 
+    '660951'; '662551'; '665254'; '680957'; '715950'; '725751'; '783462'; 
+    '814649'; '825048'; '872764'; '877168'; '898176'; '912447'; '917255'};
+
+%% Load the relevant file across subjects
+for isub = 1:length(sub)
+    % load the relevant file with the rsquared variable
+    infile = [MODIN 'CompVar_fooof_results_sub_' sub{isub}];
+    load(infile, 'rsquared');
+    %% Create an empty cell array to store the selected cells
+    high_r_squared = {};
+
+    %% Iterate over the rows and columns of the array
+    for i = 1:size(rsquared, 1) % size of the trials
+        for j = 1:size(rsquared, 2) % size of the frequencies
+            % Check if the R^2 value is greater than 0.8
+            if r_squared(i, j) > 0.8
+                % Add the cell to the selected_cells cell array
+                high_r_squared{end+1} = [i, j];
+            end
+        end
+    end    
+
+%% Save the selected r-squared trials
+
+datdir = '/home/mpib/stojanovic/PSDDATA/R_Squared_above_0.8/';
+
+%check if dir exists, if not, create it
+checkdir = exist(datdir); % returns 7 if dir is an existing folder
+                        
+if checkdir ~= 7
+    mkdir(datdir)
+end
+
+save([datdir ff 'R_squared_above_0.8' '_' cell2mat(subjno)], 'high_r_squared',...
+        '-V7.3')
+end 
