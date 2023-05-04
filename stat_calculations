@@ -1,0 +1,106 @@
+%% Script to analyse the differences across the 3 domains
+
+%% Compare time data from timelock analyses 
+
+cfg = [];
+cfg.channel     = 'all';
+cfg.avgoverchan = 'no';
+cfg.avgovertime = 'yes';
+cfg.parameter   = 'avg';
+timelock_stats  = ft_timelockstatistics(cfg,tlck_all);
+
+%% Extract the grand averages of frequency analyses
+
+% conduct for alpha power, followed by the other frequency ranges
+cfg = [];
+cfg.keepindividual = 'yes';
+cfg.foilim         = [8:12]; 
+cfg.toilim         = 'all';
+cfg.channel        = 'all';
+freq_grand_av      = ft_freqgrandaverage(cfg,trlwise_pow); 
+% ft_freqgrandaverage computes the average powspctrm over multiple subjects
+% compare frequencies as well as alpha power
+
+%% Compare alpha frequency data between the resting-state sessions
+
+% cfg = []; 
+% cfg.avgovertime = 'no';
+% cfg.avgoverchan = 'no';
+% cfg.parameter   = 'powspctrm';
+% freqstats = ft_freqstatistics(cfg,);
+
+%% Load data from output of ft_sourcegrandaverage
+
+% ft_sourcegrandaverage only used here to compute the individual source
+% grand averages, which are then combined for the statistical analysis
+
+% create averages for each resting-state session across subjects for alpha
+% power data and FOOOF outputs
+
+% load source data for resting session 1
+load('session1_source_data.mat');
+source_grandavg_group1 = ft_sourcegrandaverage(cfg, source_data{:});
+
+% load source data for resting session 2
+load('session2_source_data.mat');
+source_grandavg_group2 = ft_sourcegrandaverage(cfg, source_data{:});
+
+% load source data for resting session 3
+load('session2_source_data.mat');
+source_grandavg_group3 = ft_sourcegrandaverage(cfg, source_data{:});
+
+%% Perform the statistical analysis using ft_sourcestatistics
+
+cfg = [];
+cfg.method    = 'montecarlo';
+cfg.statistic = 'ft_statfun_indepsamplesT';
+cfg.correctm  = 'cluster';
+cfg.clusterthreshold = 'parametric';
+cfg.clusteralpha     = 0.05;
+cfg.clusterstatistic = 'maxsum';
+cfg.tail  = 0;
+cfg.alpha = 0.05;
+cfg.numrandomization = 1000;
+cfg.statistic = ft_statfun_indepsamplesT;
+
+% combine the grand averages from the three groups
+source_grandavg = {source_grandavg_group1, source_grandavg_group2, source_grandavg_group3};
+% perform the statistical analysis
+stat = ft_sourcestatistics(cfg, source_grandavg{:});
+% includes the statistical results with the p-values for each source parcel
+
+%% Compare source data between resting-state sessions
+
+% Can also compute ft_sourcegrandaverage
+cfg = []; 
+cfg.parameter = 'pow';
+cfg.keepindividual = 'yes';
+
+cfg = []; 
+cfg.parameter = 'pow'; % or powspctrm, depending on which input I end up providing
+cfg.method = 'montecarlo'; 
+cfg.statistic      = ft_statfun_indepsamplesT;
+alpha_pow_analysis = ft_sourcestatistics(cfg,source_avg);
+% replace with alpha power when calculated/as appropriate
+
+%% Conduct an independent samples t-test
+
+% cfg.statistic      = ft_statfun_indepsamplesT
+% cfg.computestat    = 'yes'; 
+% cfg.computecritval = 'yes'; 
+% cfg.computeprob    = 'yes';
+% cfg.alpha          = 0.05;
+% cfg.tail           = 1;
+
+%% Visualise the output of frequency analyses
+
+cfg              = [];
+cfg.parameter    = 'powspctrm';
+cfg.marker       = 'labels';
+cfg.markercolor  = [1,0.3,0.4,1];
+cfg.highlight    = 'labels';
+cfg.colorbar     = 'yes';
+cfg.trials       = 'all';
+cfg.baselinetype = 'absolute';
+cfg.layout       = 'grad';
+ft_topoplotER(cfg,trlwise_pow); % can input the alpha power data here
