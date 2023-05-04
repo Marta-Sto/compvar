@@ -1,0 +1,180 @@
+function setup_entropy()
+%SETUP_ENTROPY      Function to set up configurations for running entropy
+%                   analyses across subjects.
+
+%% set up configurations
+
+if ismac % local machine
+
+    % get root path (script must be run)
+    currentFile = mfilename('fullpath');
+    [pathstr,~,~] = fileparts(currentFile); 
+    cd(fullfile(pathstr,'..'))
+    rootpath = pwd;
+
+    % set fieldtrip path
+    % rootpath = '/Volumes/LNDG/Projects/HCP/';
+    rootpath = '/Users/stojanovic/Documents/Projects/MaxPlanck/Toolboxes/';
+    fieldtrip_dir = fullfile(rootpath, 'fieldtrip-20220104/');
+    addpath(fieldtrip_dir)
+
+    % set up mmse path
+    mmse_path = '/Volumes/LNDG/Programs_Tools_Scripts/mMSE/';
+    addpath(genpath(mmse_path));
+    %addpath(genpath('/Users/stojanovic/Documents/Projects/MaxPlanck/Toolboxes/mMSE')); 
+
+    % run fieldtrip defaults
+    ft_defaults()
+
+    % add megconnectome functions
+    addpath(genpath('/Volumes/FB-LIP/LNDG/Projects/HCP/MEG/megconnectome-master/'));
+    basepath = '/Volumes/FB-LIP/LNDG/Projects/HCP/';
+    addpath(basepath); 
+
+    RESTIN  = fullfile(basepath, 'MEG/');
+    MODIN   = fullfile(basepath, 'Sourceproject/SOURCEDATA/'); 
+    MODOUT  = fullfile(basepath, 'Sourceproject/ENTROPYDATA/'); addpath(MODOUT);
+    
+    backend = 'local';
+
+else % TARDIS 
+
+    % set basepath
+    basepath = '/home/mpib/stojanovic/';
+
+    % add relevant paths
+    fieldtrip_dir = '/home/mpib/stojanovic/fieldtrip-20220104/';
+    addpath(fieldtrip_dir);
+
+    addpath(basepath, 'qsub_tardis_slurmpreview/');
+
+    % add mmse path
+    mmse_path = '/home/mpib/stojanovic/mMSE/';
+    addpath(mmse_path);
+
+    % megconnectome functions
+    addpath(genpath('/home/mpib/stojanovic/megconnectome-master/'));
+    addpath(genpath('/home/mpib/stojanovic/qsub_tardis_slurmpreview/'));
+
+    % call fieldtrip defaults
+    ft_defaults()
+
+    % basic paths for MEG
+    RESTIN  = fullfile(basepath,'MEG/');
+    MODIN   = fullfile(basepath,'SOURCEDATA/Source_parc_data/');
+    MODOUT  = fullfile(basepath,'ENTROPYDATA/');
+
+    backend = 'slurm';
+    compile = 'no';
+    overwrite = 1;
+
+if strcmp(backend, 'slurm')
+  % options = '-D. -c5'; % --gres=gpu:1 % c refers to number of CPUs requested
+   options  = '-p gpu --gres gpu:turing:1';
+else
+   options =  '-l nodes=1:ppn=3';
+end
+
+% specify resource allocation on TARDIS
+stack = 1;
+timreq = 240;       % in minutes per run
+memreq = 50*1024^3; % 50 GB
+
+% check if dir exists, if not, create it
+checkdir = exist(MODOUT); % returns 7 if dir is an existing folder
+
+if checkdir ~= 7
+    mkdir(MODOUT) % set up directory only if it doesn't already exist
+end
+
+end
+
+%% List HCP subjects
+
+% sub = {'100307'; '102816'; '105923'; '106521'; '108323'; '109123'; 
+%        '111514'; '113922'; '116726'; '133019'; '140117'; '146129'; 
+%        '149741'; '153732'; '156334'; '158136'; '162026'; '166438'; 
+%        '172029'; '175540'; '177746'; '181232'; '185442'; '187547'; 
+%        '189349'; '191437'; '191841'; '195041'; '204521'; 
+%        '205119'; '212318'; '221319'; '233326'; '250427'; '255639'; 
+%        '287248'; '293748'; '352738'; '406836'; '433839'; 
+%        '512835'; '559053'; '568963'; '599671'; '601127'; '660951'; 
+%        '665254'; '680957'; '715950'; '725751'; '783462'; 
+%        '814649'; '825048'; '872764'; '877168'; '898176'};
+
+sub = {'100307'; '102816'; '105923'; '106521'; '108323'; '109123'; 
+       '111514'; '113922'; '133019'; '140117'; '146129'; '116524';
+       '149741'; '153732'; '156334'; '158136'; '162026'; '166438'; 
+       '172029'; '175540'; '177746'; '181232'; '185442'; '187547'; 
+       '189349'; '191437'; '191841'; '193641'; '195041'; '204521'; 
+       '205119'; '212318'; '221319'; '233326'; '250427'; '255639'; 
+       '287248'; '293748'; '352132'; '352738'; '433839'; '512835'; 
+       '559053'; '568963'; '599671'; '601127'; '660951'; '662551'; 
+       '665254'; '680957'; '715950'; '725751'; '783462'; '814649';
+       '825048'; '872764'; '877168'; '898176'; '912447'; '917255'};
+
+%% Make configurations (cfg) list
+
+cfg         = [];
+cfglist     = {};
+
+for isub = 1:length(sub)
+
+    cfg.RESTIN  = RESTIN;
+    cfg.MODIN   = MODIN;
+    cfg.MODOUT  = MODOUT;
+
+
+    ff = filesep; % file seperator (different for Mac or Windows)
+    cfg.outfile = [MODOUT ff sub{isub} 'mmse_estimate.mat']; % output
+
+    subjno      = sub(isub);
+    restfolder  = [RESTIN ff sub{isub}];
+    restfile    = [restfolder ff [sub{isub} '_' 'MEG_3-Restin_rmegpreproc.mat']];
+    % restfile = [restfolder ff [sub{isub} '_' 'MEG_4-Restin_rmegpreproc.mat']];
+    % restfile = [restfolder ff [sub{isub} '_' 'MEG_5-Restin_rmegpreproc.mat']];
+    parcfolder  = [MODIN 'First_RS_session' ff 'Parc_trls'];
+    parcfile    = [parcfolder ff 'CompVar_source_parc_trls' '_' cell2mat(subjno)];
+
+    cfg.parcfile = parcfile;
+    cfg.restfile = restfile;
+    cfg.subjno   = subjno;
+
+    if ~exist(cfg.outfile, 'file') || overwrite
+        cfglist = [cfglist cfg];
+    end
+    
+    fprintf('Computing for %d subject\n', isub);
+
+end
+
+%% Shuffle configurations and check
+% shuffle list of configurations to run
+cfglist = cfglist(randsample(length(cfglist),length(cfglist)));
+
+% print out the number of data files
+fprintf('Computing for %d subject(s)\n', length(cfglist))
+
+% check the directory
+mkdir('~/qsub');
+
+%% Run source estimation on parcellated data
+% compile the function to be executed in a batch on the server
+% run function has to live in the same folder as the setup to work
+if strcmp(backend, 'slurm')
+fun2run = qsubcompile({@run_entropy_tardis}, 'toolbox', {'signal', 'stats', 'parallel'}); 
+else
+fun2run = @run_entropy_tardis;    % fun2run takses all prior inputs and returns 
+                                  % the parcellated source estimation per subject                                   
+end 
+
+if strcmp(backend, 'local')
+    cellfun(fun2run, cfglist)
+    return
+end
+
+% prepare job list, where qsubcellfun applies the source script to each element of a cell array
+qsubcellfun(fun2run, cfglist, 'memreq', memreq, 'timreq', timreq*60, 'stack', stack, ...
+'StopOnError', true, 'backend', backend, 'options', options);
+
+end
