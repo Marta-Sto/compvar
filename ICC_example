@@ -1,0 +1,19 @@
+%% Plotting ICC data per parcel
+
+% Load the time-series data for a single parcel for three resting-state sessions
+icc_data = load('parcel_data.mat');
+
+% Reshape the data so that each column represents a single session
+data = reshape(icc_data, [], 3);
+
+% Calculate the ICC using the icc function
+[icc, ~, ~, F, df1, df2, pval] = icc(icc_data);
+
+% Display the ICC and associated statistics
+fprintf('ICC = %.3f\n', icc_data);
+fprintf('F = %.3f\n', F);
+fprintf('df1 = %d\n', df1);
+fprintf('df2 = %d\n', df2);
+fprintf('p-value = %.3f\n', pval);
+
+%% load data for ICC analyses and run across subjects
