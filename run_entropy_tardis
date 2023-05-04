@@ -1,0 +1,97 @@
+function run_entropy_tardis(cfg)
+%RUN_ENTROPY_TARDIS Function that runs entropy estimates across subjects.
+
+%% list HCP subjects
+
+sub = {'100307'; '102816'; '105923'; '106521'; '108323'; '109123'; '111514'; 
+        '113922'; '116726'; '125525'; '133019'; '140117'; '146129'; '149741'; 
+        '153732'; '156334'; '158136'; '162026'; '166438'; '172029'; '175540'; 
+        '177746'; '181232'; '185442'; '187547'; '189349'; '191033'; '191437'; 
+        '191841'; '195041'; '204521'; '205119'; '212318'; '221319'; '233326'; 
+        '250427'; '255639'; '287248'; '293748'; '352132'; '352738'; '406836'; 
+        '433839'; '512835'; '559053'; '568963'; '599671'; '601127'; '660951'; 
+        '662551'; '665254'; '680957'; '715950'; '725751'; '783462'; '814649'; 
+        '825048'; '872764'; '877168'; '898176'; '912447'; '917255'};
+
+%% pass configurations list
+
+% pass cfgs set up in the setup function
+restfile   = cfg.restfile; 
+parcfile   = cfg.parcfile;
+subjno     = cfg.subjno;
+MODOUT     = cfg.MODOUT;
+
+%% load relevant data per subject
+clear data; clear parc_trls;
+
+load(restfile);
+load(parcfile);
+
+%% reshape parcellated trials data struct
+% create raw data struct from timelock struct
+% (the timelock struct is parcellated trial data)
+
+clear dummy_entropy; 
+dummy_entropy = parc_trls;
+dummy_entropy.trial = [];
+for itrial =1:size(parc_trls.trial,1)
+    dummy_entropy.trial{itrial} = squeeze(parc_trls.trial(itrial,:,:));
+end
+dummy_entropy.label = parc_trls.label;
+dummy_entropy.time  = data.time; % important for the struct
+                                 % to be recognised as raw
+dummy_entropy       = rmfield(dummy_entropy,'brainordinate');
+dummy_entropy.cfg   = data.cfg;
+disp('Done initially reshaping struct');
+
+%% reshape timelock struct into raw datatype
+% raw datatype only requires trial, time, and label fields
+% all other fields are optional
+
+clear test_entropy;
+test_entropy = struct();
+test_entropy.trial = dummy_entropy.trial;
+test_entropy.time  = dummy_entropy.time;
+test_entropy.label = dummy_entropy.label;
+disp('Done creating test_entropy struct');
+
+%% reshape the data to create a new trial field
+% reshape the trial dimension in the struct
+trial_size      = size(parc_trls.trial);
+reshaped_trial  = reshape(parc_trls.trial, [trial_size(1), trial_size(2)*trial_size(3)]);
+reshaped_cell   = mat2cell(reshaped_trial, trial_size(1), repmat(trial_size(2), [1, trial_size(3)]));
+parc_trls.trial = reshaped_cell;
+disp('Struct updated with reshaped trial data');
+
+%% run entropy analysis on reshaped struct
+% run ft_entropyanalysis function for entropy estimates
+cfg     = [];
+cfg.toi = 1; % center analysis arounf this timepoint
+cfg.timescales = 1:2; % timescale (1=fastest dynamics, ...)
+cfg.timwin     = [2]; % consider all samples within a x second window centered on toi
+cfg.coarsegrainmethod = 'pointavg'; % check which method to use for coarse graining
+cfg.filtmethod = 'lp';
+cfg.m          = 2;
+cfg.r          = 0.5;
+cfg.channel    = 'all';
+cfg.polyremoval  = 0;
+cfg.mem_availabl = 8e9;
+cfg.recompute_r  = 'per_toi';
+cfg.allowgpu     = 1;
+mmse = ft_entropyanalysis(cfg,test_entropy);
+disp('Done running mmse analyses');
+
+%% save the MMSE output
+% create directory to save the mmse analysis output
+% MODOUT = '/home/mpib/stojanovic/ENTROPYDATA/';
+ff     = filesep;
+
+if ~exist([MODOUT 'MMSE_data' ff]) % create directory if it does not already exist
+    mkdir([MODOUT 'MMSE_data' ff])
+end
+
+% save the data to the directory
+save([MODOUT 'MMSE_data' ff 'CompVar_mmse_data' '_' cell2mat(subjno)], 'mmse',...
+        '-V7.3')
+    
+end
