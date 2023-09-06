@@ -1,0 +1,69 @@
+function calculate_icc()
+% Function that calculates the ICC per parcel across subjects.
+
+clc 
+clear 
+
+%% Define the common filename components
+commonPrefix = 'CompVar_mmse_data_'; 
+fileExtension = '.mat';
+
+%% Define subject list
+sub = {'113922'; '112920'; '109123'; '108323'; '106521'; '105923'; '102816'; '100307'};
+
+% Initialize an array to store ICC values
+numSubjects = numel(sub);
+
+%% Initialize a structure to store ICC results for each parcel
+icc_results = struct();
+
+%% Define the number of data parcels (assuming 245)
+numParcels = 245;
+
+for parcel = 1:numParcels
+
+    % Initialize a cell array to store sampen data for all subjects
+    sampen_data = cell(numSubjects, 1);
+    
+    for subject = 1:numSubjects
+        
+        subjectCode = sub{subject};
+        filename = [commonPrefix, subjectCode, fileExtension];
+        data = load(filename); % Load the data from the file
+        
+        % Extract the sampen data for the current subject and parcel
+        sampen_data{subject} = data.mmse.sampen(:, parcel);
+    end
+    
+    % Calculate ICC across subjects for the current parcel
+    [r, LB, UB, F, df1, df2] = ICC(sampen_data, '1-k', .05);
+    
+    % Store the ICC result in the structure with a dynamic field name
+    field_name = sprintf('Parcel_%d', parcel);
+
+    % Store the ICC results in the structure with a dynamic field name
+    icc_results.(field_name) = struct(...
+        'ICC', r, ...
+        'LowerBound', LB, ...
+        'UpperBound', UB, ...
+        'FStatistic', F, ...
+        'DF1', df1, ...
+        'DF2', df2 ...
+    );
+
+    icc_results.(field_name) = icc_result;
+    
+    % Display the ICC result for the current parcel
+    fprintf('ICC for Parcel %d: %.4f\n', parcel, icc_result);
+end
+
+% Save the icc_results structure to a MAT file
+save('icc_results.mat', 'icc_results');
+
+% Display a message to confirm that the data has been saved
+fprintf('ICC results saved to "icc_results.mat".\n');
+
+% Display the overall ICC value (optional)
+% Calculate the mean ICC across all parcels
+mean_icc = mean(struct2array(icc_results));
+fprintf('Mean ICC across all parcels: %.4f\n', mean_icc);
