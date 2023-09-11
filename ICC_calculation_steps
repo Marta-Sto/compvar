@@ -1,0 +1,48 @@
+%% Script to plot the output of MMSE analyses and obtain statistics %%
+
+%% Reshape the ft_entropyanalysis output to resemble a freq structure
+% the mmse struct is comparable to a freq structure as would be obtained
+% from ft_freqanalysis
+% the exception is that timescales replaces the frequency field, indicating
+% the timescales axis, and sampen replaces the powspctrm field
+
+nchan = length(mmse.label);
+ntime = length(mmse.time);
+nfreq = length(mmse.freq);
+entropy_values = reshape(mmse.sampen, nchan, ntime, nfreq);
+
+
+%% Plot the mMSE analysis output
+
+% Use ft_multiplotTFR for plotting the mmse output
+% Use ft_freqstatistics to compute statistics for the entropy analyses
+
+%% Calculate ICC
+% longer timescales accessed by increasingly coarsening the data - average
+% neighbouring data points or point skipping after low-pass filtering
+
+% Define the number of subjects
+numSubjects = 8;
+
+% Initialize arrays to store ICC values
+icc_values = zeros(numSubjects, 1);
+
+for subject = 1:numSubjects
+    % Load each MATLAB file
+    filename = sprintf('subject%d.mat', subject);
+    data = load(filename); % Load the data from the file
+    
+    % Extract the sampen data for the current subject
+    sampen_data = data.ft_entropyanalysis.sampen;
+    
+    % Calculate ICC between the two columns of sampen_data
+    icc_result = ICC(2, 'single', sampen_data); % Assuming you want a two-way random effects ICC
+    icc_values(subject) = icc_result(3); % Extract the ICC(3,1) value
+    
+    % Display the ICC result for the current subject
+    fprintf('ICC for Subject %d: %.4f\n', subject, icc_values(subject));
+end
+
+% Display the overall ICC value (optional)
+overall_icc = mean(icc_values);
+fprintf('Overall ICC: %.4f\n', overall_icc);
