@@ -1,0 +1,114 @@
+%% MMSE ICC SCRIPT %% 
+
+%% Load MMSE data per subject
+
+% Create a new MMSE structure from all the MMSE data loaded across subjects
+mmse_struct = []; % Initialise the struct
+
+% Append data loaded from subjects in the directory
+% Do so within the folder where the data is located after loading the mmse
+% data from files with the name per sub: mmse_subname
+% mmse_struct = [mmse_113922;mmse_112920...];
+
+%% Loop across parcels in all subject data
+
+% Define the number of subjects
+numSubjects = 8;
+% numSubjects = 95;
+
+% Define the number of rows, where each row represents a parcel
+numRows = 245;
+
+% For each row, i.e., each parcel
+for row = 1:numRows
+    % Initialize a matrix
+    currentRowMatrix = [];
+
+    % Loop through subjects
+    for subject = 1:numSubjects
+        % Get the data for the current subject and row
+        data = mmse(subject).sampen(row, :);
+
+        % Append the data to the current row matrix
+        currentRowMatrix = [currentRowMatrix; data];
+    end
+
+% Store the current row matrix in the cell array
+rowMatrices{row} = currentRowMatrix; % rowMatrices is now a 245x1 cell
+                                     % each cell field is a 
+
+end
+
+%% Calculate the ICC value for each row (parcel)
+
+% Initialize an array to store ICC values
+icc_values = zeros(245, 1);
+
+% Iterate through each field in rowMatrices, where each field is 95x2,
+% where each row contains data for each subject between two rs sessions
+for i = 1:245
+
+    % Get the data from the current field
+    data = rowMatrices{i};
+    
+    % Calculate ICC for the current data and store it in icc_values
+    icc_values(i) = ICC(data, '1-1'); % Make sure the ICC function is 
+                                      % correctly loaded from the Statistics Toolbox
+                                      % and correctly added to the current ICC path
+
+    % Display ICC value along with the row index
+    fprintf('Row %d: ICC Value: %.4f\n', i, icc_values(i));
+end
+
+% Display ICC values
+disp('ICC Values:');
+disp(icc_values);
+
+%% Calculate ICC by hand as a sanity check
+
+% Assuming your data is stored in rowMatrices{1,1}
+data = rowMatrices{225,1};
+
+% Calculate Total Variance
+total_variance = var(data(:,1)) + var(data(:,2));
+
+% Calculate Within-Group Variance
+within_group_variance = (var(data(:,1)) + var(data(:,2))) / 2;
+
+% Calculate Between-Group Variance
+between_group_variance = total_variance - within_group_variance;
+
+% Calculate ICC
+icc = between_group_variance / total_variance;
+
+
+%% 
+
+% Assuming you have rowMatrices as a 245x1 cell
+num_fields = numel(rowMatrices); % Get the number of fields
+
+% Initialize an array to store ICC values
+icc_values_check = zeros(num_fields, 1);
+
+% Iterate through each cell in rowMatrices
+for i = 1:num_fields
+    % Get the data from the current cell
+    data = rowMatrices{i};
+    
+    % Calculate Total Variance
+    total_variance = var(data(:, 1)) + var(data(:, 2));
+    
+    % Calculate Within-Group Variance
+    within_group_variance = (var(data(:, 1)) + var(data(:, 2))) / 2;
+    
+    % Calculate Between-Group Variance
+    between_group_variance = total_variance - within_group_variance;
+    
+    % Calculate ICC for the current data and store it in icc_values
+    icc_values_check(i) = between_group_variance / total_variance;
+end
+
+% Display ICC values along with their corresponding field indices
+for i = 1:num_fields
+    fprintf('Field %d: ICC Value: %.4f\n', i, icc_values(i));
+end
