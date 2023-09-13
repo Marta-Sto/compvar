@@ -1,0 +1,52 @@
+% Initialize matrices to store ICC output values for each row
+icc_values_r = zeros(245, 1);
+icc_values_LB = zeros(245, 1);
+icc_values_UB = zeros(245, 1);
+icc_values_F = zeros(245, 1);
+icc_values_df1 = zeros(245, 1);
+icc_values_df2 = zeros(245, 1);
+icc_values_p = zeros(245, 1);
+
+% Initialize a matrix to store data from all parcels
+all_data = [];
+
+% Iterate through each field in MSEPerParcel, where each field is 95x2,
+% where each row contains data for each subject between two rs sessions
+for i = 1:245
+    % Get the data from the current field
+    data = MSEPerParcel{i};
+    
+    % Calculate ICC for the current data and store the output values
+    [r, LB, UB, F, df1, df2, p] = ICC(data, '1-1');
+    
+    % Store ICC output values in respective matrices
+    icc_values_r(i) = r;
+    icc_values_LB(i) = LB;
+    icc_values_UB(i) = UB;
+    icc_values_F(i) = F;
+    icc_values_df1(i) = df1;
+    icc_values_df2(i) = df2;
+    icc_values_p(i) = p;
+
+    % Append the current data to the all_data matrix
+    all_data = [all_data; data];
+    
+    % Display ICC value along with the row index
+    fprintf('Row %d: ICC Value (r): %.4f\n', i, r);
+    fprintf('Row %d: ICC Lower Bound (LB): %.4f\n', i, LB);
+    fprintf('Row %d: ICC Upper Bound (UB): %.4f\n', i, UB);
+    fprintf('Row %d: ICC F-statistic (F): %.4f\n', i, F);
+    fprintf('Row %d: ICC Degrees of Freedom (df1, df2): %d, %d\n', i, df1, df2);
+    fprintf('Row %d: ICC p-value (p): %.4f\n', i, p);
+end
+
+% Calculate the overall ICC for all parcels using all_data
+[overall_r, overall_LB, overall_UB, overall_F, overall_df1, overall_df2, overall_p] = ICC(all_data, '1-1');
+
+% Display the overall ICC values
+fprintf('\nOverall ICC Value (r): %.4f\n', overall_r);
+fprintf('Overall ICC Lower Bound (LB): %.4f\n', overall_LB);
+fprintf('Overall ICC Upper Bound (UB): %.4f\n', overall_UB);
+fprintf('Overall ICC F-statistic (F): %.4f\n', overall_F);
+fprintf('Overall ICC Degrees of Freedom (df1, df2): %d, %d\n', overall_df1, overall_df2);
+fprintf('Overall ICC p-value (p): %.4f\n', overall_p);
