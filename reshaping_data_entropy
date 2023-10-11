@@ -1,0 +1,176 @@
+%% Create a new struct to hold the first 40 fields
+first_40_fields = struct();
+
+% Extract the first 40 fields from alpha_raw_dummy.trial
+fields_to_extract = 1:40; % Adjust this if you want a different range
+for i = fields_to_extract
+    field_name = sprintf('field%d', i);  % You can customize the field names
+    first_40_fields.(field_name) = alpha_raw_dummy.trial(:, i);
+end
+
+% Add the first_40_fields to alpha_raw_dummy
+alpha_raw_dummy.first_40_fields = first_40_fields;
+
+% Save your struct back to its original variable or a new one if needed
+% For example, you can overwrite alpha_raw_dummy with the updated data
+% alpha_raw_dummy = your_updated_struct;
+
+%%
+
+% Extract the first 40 fields from alpha_raw_dummy.trial
+fields_to_extract = 1:40; % Adjust this if you want a different range
+
+% Initialize a cell array to store the extracted fields
+first_40_cell = cell(1, 40);
+
+for i = fields_to_extract
+    first_40_cell{i} = alpha_raw_dummy.trial(:, i);
+end
+
+% Add the cell array to alpha_raw_dummy
+alpha_raw_dummy.first_40_cell = first_40_cell;
+
+% Save your struct back to its original variable or a new one if needed
+% For example, you can overwrite alpha_raw_dummy with the updated data
+% alpha_raw_dummy = your_updated_struct;
+
+%%
+
+% Extract the first 40 fields from alpha_raw_dummy.trial
+fields_to_extract = 1:40; % Adjust this if you want a different range
+
+% Initialize a cell array to store the extracted fields
+first_40_cell = cell(1, 40);
+
+for i = fields_to_extract
+    first_40_cell{i} = alpha_raw_dummy.trial(:, i);
+end
+
+% Save the cell array in alpha_raw_dummy
+alpha_raw_dummy.first_40_cell = first_40_cell;
+
+% Remove the fields from the original struct if needed
+alpha_raw_dummy.trial(:, fields_to_extract) = [];
+
+% Save your struct back to its original variable or a new one if needed
+% For example, you can overwrite alpha_raw_dummy with the updated data
+% alpha_raw_dummy = your_updated_struct;
+
+%%
+
+% Extract the first 40 fields from alpha_raw_dummy.trial
+fields_to_extract = 1:40; % Adjust this if you want a different range
+
+% Initialize a cell array to store the extracted fields
+first_246_cell = cell(1, 246);
+
+for i = 1:246
+    first_246_cell{i} = alpha_raw_dummy.trial(i, fields_to_extract);
+end
+
+% Save the cell array in alpha_raw_dummy
+alpha_raw_dummy.first_246_cell = first_246_cell;
+
+% Remove the fields from the original struct if needed
+alpha_raw_dummy.trial(:, fields_to_extract) = [];
+
+% Save your struct back to its original variable or a new one if needed
+% For example, you can overwrite alpha_raw_dummy with the updated data
+% alpha_raw_dummy = your_updated_struct;
+
+%%
+
+% Determine the number of existing cells in alpha_raw_dummy.time
+num_existing_cells = length(alpha_raw_dummy.time);
+
+% Determine the number of additional cells you want to add
+num_additional_cells = 245 - num_existing_cells;
+
+% Determine which field to copy data from
+% For example, if you want to copy data from the first field, you can use:
+field_to_copy = alpha_raw_dummy.time{1};
+
+% Create additional cells by copying the data
+additional_cells = cell(1, num_additional_cells);
+additional_cells(:) = {field_to_copy};
+
+% Extend the alpha_raw_dummy.time cell array
+alpha_raw_dummy.time = [alpha_raw_dummy.time, additional_cells];
+
+% Save your struct back to its original variable or a new one if needed
+% For example, you can overwrite alpha_raw_dummy with the updated data
+% alpha_raw_dummy = your_updated_struct;
+
+%%
+
+% Create a new struct to store the averaged data
+averaged_test_entropy = struct();
+
+% Loop through the 1x245 cell fields
+for i = 1:245
+    % Access the 109x1018 double in the current field
+    data_in_cell = test_entropy.trial{i};
+    
+    % Compute the average along the first dimension (109 rows)
+    averaged_data = mean(data_in_cell, 1);
+    
+    % Store the averaged data in the new struct
+    field_name = sprintf('field%d', i);  % You can customize the field names
+    averaged_test_entropy.(field_name) = averaged_data;
+end
+
+% Now, averaged_test_entropy contains 1x245 fields, each with a 1x1018 double
+
+%%
+
+% Create a structure array to store the averaged data
+averaged_data_struct = struct('data', cell(1, 245));
+
+% Loop through the 245 fields in the 1x1 struct
+for i = 1:245
+    % Access the 1x1018 double in the current field
+    data_in_field = test_entropy.trial.(sprintf('field%d', i));
+    
+    % Compute the average along the first dimension (109 rows)
+    averaged_data = mean(data_in_field, 1);
+    
+    % Store the averaged data in the structure array
+    averaged_data_struct(i).data = averaged_data;
+end
+
+% Now, averaged_data_struct is a structure array with 245 fields, each containing a 1x1018 double
+
+%%
+
+% Initialize a cell array to store the averaged data
+averaged_data_cell = cell(1, 245);
+
+% Loop through the fields in the structure array
+for i = 1:245
+    % Access the 1x1018 double in the current field
+    data_in_field = averaged_data_struct(i).data;
+    
+    % Store the data in the cell array
+    averaged_data_cell{i} = data_in_field;
+end
+
+% Now, averaged_data_cell is a 1x245 cell, where each cell contains a 1x1018 double
+
+%%
+
+% Initialize a cell array to store the reshaped data
+reshaped_data_cell = cell(1, 245);
+
+% Loop through the 1x245 cell fields
+for i = 1:245
+    % Access the string in the current field
+    string_in_cell = test_entropy.label{i};
+    
+    % Create a cell array by repeating the strings
+    repeated_strings = repmat({string_in_cell}, 1, 1018);
+    
+    % Store the reshaped data in the cell array
+    reshaped_data_cell{i} = repeated_strings;
+end
+
+% Now, reshaped_data_cell is a 1x245 cell, where each cell contains a 1x1018 cell with repeating values from the previous cell
